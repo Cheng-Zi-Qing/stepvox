@@ -3,7 +3,7 @@ import { VIEW_TYPE_STEPVOX, DISPLAY_NAME } from "../constants";
 import type { PipelineState, ConversationEntry } from "../types";
 
 export class StepVoxView extends ItemView {
-  private state: PipelineState = "idle";
+  private pipelineState: PipelineState = "idle";
   private conversation: ConversationEntry[] = [];
 
   constructor(leaf: WorkspaceLeaf) {
@@ -23,7 +23,7 @@ export class StepVoxView extends ItemView {
   }
 
   async onOpen(): Promise<void> {
-    const container = this.containerEl.children[1];
+    const container = this.contentEl;
     container.empty();
     container.addClass("stepvox-container");
 
@@ -42,8 +42,8 @@ export class StepVoxView extends ItemView {
 
   async onClose(): Promise<void> {}
 
-  setState(state: PipelineState): void {
-    this.state = state;
+  setPipelineState(state: PipelineState): void {
+    this.pipelineState = state;
   }
 
   addEntry(entry: ConversationEntry): void {

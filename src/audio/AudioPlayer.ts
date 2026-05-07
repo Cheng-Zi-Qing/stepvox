@@ -14,7 +14,7 @@ export class AudioPlayer {
 
   on<K extends EventName>(event: K, handler: AudioPlayerEvents[K]): void {
     if (!this.listeners[event]) {
-      this.listeners[event] = new Set();
+      this.listeners[event] = new Set() as never;
     }
     (this.listeners[event] as Set<AudioPlayerEvents[K]>).add(handler);
   }
@@ -55,6 +55,9 @@ export class AudioPlayer {
       this.playing = true;
       this.emit("start");
     } catch (err) {
+      if (this.currentSource) {
+        this.currentSource.onended = null;
+      }
       this.playing = false;
       this.currentSource = null;
       this.emit("error", err instanceof Error ? err : new Error(String(err)));
@@ -92,7 +95,11 @@ export class AudioPlayer {
       | undefined;
     if (handlers) {
       for (const fn of handlers) {
-        fn(...args);
+        try {
+          fn(...args);
+        } catch (e) {
+          console.error("[StepVox] AudioPlayer listener error:", e);
+        }
       }
     }
   }

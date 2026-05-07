@@ -31,7 +31,7 @@ export class AudioRecorder {
 
   on<K extends EventName>(event: K, handler: AudioRecorderEvents[K]): void {
     if (!this.listeners[event]) {
-      this.listeners[event] = new Set();
+      this.listeners[event] = new Set() as never;
     }
     (this.listeners[event] as Set<AudioRecorderEvents[K]>).add(handler);
   }
@@ -75,7 +75,7 @@ export class AudioRecorder {
       };
 
       this.source.connect(this.workletNode);
-      this.workletNode.connect(this.context.destination);
+      // Do NOT connect to destination — avoids mic feedback loop
 
       this.recording = true;
       this.emit("start");
@@ -98,7 +98,10 @@ export class AudioRecorder {
   }
 
   private cleanup(): void {
-    this.workletNode?.disconnect();
+    if (this.workletNode) {
+      this.workletNode.port.onmessage = null;
+      this.workletNode.disconnect();
+    }
     this.workletNode = null;
     this.source?.disconnect();
     this.source = null;
@@ -119,7 +122,11 @@ export class AudioRecorder {
       | undefined;
     if (handlers) {
       for (const fn of handlers) {
-        fn(...args);
+        try {
+          fn(...args);
+        } catch (e) {
+          console.error("[StepVox] AudioRecorder listener error:", e);
+        }
       }
     }
   }

@@ -30,7 +30,15 @@ export default class StepVoxPlugin extends Plugin {
   onunload(): void {}
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const saved = (await this.loadData()) ?? {};
+    this.settings = {
+      asr: { ...DEFAULT_SETTINGS.asr, ...saved.asr },
+      tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts },
+      llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
+      interaction: { ...DEFAULT_SETTINGS.interaction, ...saved.interaction },
+      audio: { ...DEFAULT_SETTINGS.audio, ...saved.audio },
+      execution: { ...DEFAULT_SETTINGS.execution, ...saved.execution },
+    };
   }
 
   async saveSettings(): Promise<void> {
