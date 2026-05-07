@@ -8,3 +8,8 @@ export const DEFAULT_TTS_VOICE = "cixingnansheng";
 export const DEFAULT_SAMPLE_RATE = 16000;
 export const DEFAULT_WAKE_WORD = "Hey Vox";
 export const DEFAULT_COMMAND_TIMEOUT_MS = 10000;
+
+export const STEPFUN_ASR_WS_ENDPOINT =
+  "wss://api.stepfun.com/v1/realtime/asr/stream";
+export const STEPFUN_TTS_ENDPOINT =
+  "https://api.stepfun.com/v1/audio/speech";
