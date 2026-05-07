@@ -1,0 +1,9 @@
+{
+  "id": "stepvox",
+  "name": "StepVox",
+  "version": "0.1.0",
+  "minAppVersion": "1.7.0",
+  "description": "Voice assistant for Obsidian — control your vault with speech.",
+  "author": "StepVox",
+  "isDesktopOnly": true
+}
