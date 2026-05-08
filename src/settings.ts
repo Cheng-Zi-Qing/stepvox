@@ -27,6 +27,7 @@ export interface StepVoxSettings {
     volume: number;
   };
   llm: {
+    format: "openai" | "anthropic";
     endpoint: string;
     apiKey: string;
     model: string;
@@ -49,6 +50,7 @@ export interface StepVoxSettings {
     vaultName: string;
     commandTimeout: number;
     confirmDestructive: boolean;
+    confirmAllWrites: boolean;
   };
 }
 
@@ -69,6 +71,7 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
     volume: 1.0,
   },
   llm: {
+    format: "openai",
     endpoint: "",
     apiKey: "",
     model: "",
@@ -77,7 +80,7 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
   },
   interaction: {
     mode: "push-to-talk",
-    hotkey: "Mod+Shift+V",
+    hotkey: "Alt+v",
     wakeWord: DEFAULT_WAKE_WORD,
     sensitivity: 0.5,
     silenceTimeout: 1500,
@@ -91,6 +94,7 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
     vaultName: "",
     commandTimeout: DEFAULT_COMMAND_TIMEOUT_MS,
     confirmDestructive: true,
+    confirmAllWrites: false,
   },
 };
 
@@ -152,8 +156,21 @@ export class StepVoxSettingTab extends PluginSettingTab {
     // LLM
     containerEl.createEl("h3", { text: "LLM" });
     new Setting(containerEl)
+      .setName("API Format")
+      .setDesc("Select your LLM provider's API format")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("openai", "OpenAI Compatible")
+          .addOption("anthropic", "Anthropic")
+          .setValue(this.plugin.settings.llm.format)
+          .onChange(async (value) => {
+            this.plugin.settings.llm.format = value as "openai" | "anthropic";
+            await this.plugin.saveSettings();
+          })
+      );
+    new Setting(containerEl)
       .setName("Endpoint")
-      .setDesc("OpenAI-compatible API endpoint")
+      .setDesc("API endpoint")
       .addText((text) =>
         text
           .setPlaceholder("https://api.example.com/v1")

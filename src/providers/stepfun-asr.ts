@@ -3,7 +3,7 @@ import type {
   ASRStreamCallbacks,
   ASRStreamSession,
 } from "./types";
-import { STEPFUN_ASR_WS_ENDPOINT } from "../constants";
+import { STEPFUN_ASR_SSE_ENDPOINT } from "../constants";
 import { float32ToPCM16, arrayBufferToBase64 } from "./utils";
 
 interface StepFunASRConfig {
@@ -18,183 +18,141 @@ export class StepFunASR implements ASRProvider {
   readonly name = "StepFun ASR";
 
   private config: StepFunASRConfig;
-  private activeSession: { ws: WebSocket } | null = null;
+  private abortController: AbortController | null = null;
 
   constructor(config: StepFunASRConfig) {
     this.config = config;
   }
 
   async validate(): Promise<boolean> {
-    return new Promise((resolve) => {
-      const ws = new WebSocket(STEPFUN_ASR_WS_ENDPOINT, [
-        "realtime",
-        `bearer.${this.config.apiKey}`,
-      ]);
-
-      const timeout = setTimeout(() => {
-        ws.close();
-        resolve(false);
-      }, 5000);
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(String(e.data));
-          if (msg.type === "session.created") {
-            clearTimeout(timeout);
-            ws.close();
-            resolve(true);
-          }
-        } catch {
-          clearTimeout(timeout);
-          ws.close();
-          resolve(false);
-        }
-      };
-
-      ws.onerror = () => {
-        clearTimeout(timeout);
-        resolve(false);
-      };
-    });
+    return !!this.config.apiKey;
   }
+
   async startStreaming(callbacks: ASRStreamCallbacks): Promise<ASRStreamSession> {
-    if (this.activeSession) {
-      this.activeSession.ws.close();
-      this.activeSession = null;
-    }
-
-    const ws = new WebSocket(STEPFUN_ASR_WS_ENDPOINT, [
-      "realtime",
-      `bearer.${this.config.apiKey}`,
-    ]);
-
-    this.activeSession = { ws };
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        ws.close();
-        reject(new Error("ASR connection timeout"));
-      }, 10000);
-
-      ws.onopen = () => {
-        ws.send(
-          JSON.stringify({
-            type: "session.update",
-            session: {
-              input_audio_format: {
-                type: "pcm16",
-                sample_rate: this.config.sampleRate,
-                channels: 1,
-              },
-              turn_detection: {
-                type: "server_vad",
-                silence_duration_ms: 800,
-                threshold: 0.5,
-              },
-              transcription: {
-                model: this.config.model,
-                language: this.config.language,
-                full_rerun_on_commit: true,
-                enable_itn: true,
-              },
-            },
-          })
-        );
-      };
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(String(e.data));
-          this.handleMessage(msg, callbacks, timeout, resolve);
-        } catch (err) {
-          callbacks.onError(
-            err instanceof Error ? err : new Error(String(err))
-          );
-        }
-      };
-
-      ws.onerror = () => {
-        clearTimeout(timeout);
-        const err = new Error("ASR WebSocket error");
-        callbacks.onError(err);
-        reject(err);
-      };
-
-      ws.onclose = () => {
-        this.activeSession = null;
-      };
-    });
-  }
-
-  private handleMessage(
-    msg: { type: string; delta?: string; transcript?: string },
-    callbacks: ASRStreamCallbacks,
-    timeout: ReturnType<typeof setTimeout>,
-    resolve: (session: ASRStreamSession) => void
-  ): void {
-    switch (msg.type) {
-      case "session.created":
-      case "session.updated":
-        clearTimeout(timeout);
-        resolve(this.createSession());
-        break;
-      case "conversation.item.input_audio_transcription.delta":
-        if (msg.delta) callbacks.onPartial(msg.delta);
-        break;
-      case "conversation.item.input_audio_transcription.completed":
-        if (msg.transcript) callbacks.onFinal(msg.transcript);
-        break;
-      case "input_audio_buffer.speech_started":
-        callbacks.onVADStart?.();
-        break;
-      case "input_audio_buffer.speech_stopped":
-        callbacks.onVADStop?.();
-        break;
-      case "error":
-        callbacks.onError(new Error(JSON.stringify(msg)));
-        break;
-    }
-  }
-
-  private createSession(): ASRStreamSession {
-    const ws = this.activeSession?.ws;
-    if (!ws) throw new Error("No active WebSocket");
+    const chunks: ArrayBuffer[] = [];
 
     return {
       send: (chunk: Float32Array) => {
-        if (ws.readyState !== WebSocket.OPEN) return;
         const pcm16 = float32ToPCM16(chunk);
-        const base64 = arrayBufferToBase64(pcm16);
-        ws.send(
-          JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: base64,
-          })
-        );
+        chunks.push(pcm16);
       },
       commit: () => {
-        if (ws.readyState !== WebSocket.OPEN) return;
-        ws.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
+        void this.recognize(chunks, callbacks);
       },
       close: () => {
-        try {
-          ws.close();
-        } catch {
-          // already closed
-        }
-        this.activeSession = null;
+        this.abortController?.abort();
+        this.abortController = null;
       },
     };
   }
 
-  dispose(): void {
-    if (this.activeSession) {
-      try {
-        this.activeSession.ws.close();
-      } catch {
-        // already closed
-      }
-      this.activeSession = null;
+  private async recognize(
+    chunks: ArrayBuffer[],
+    callbacks: ASRStreamCallbacks
+  ): Promise<void> {
+    if (chunks.length === 0) {
+      callbacks.onFinal("");
+      return;
     }
+
+    const totalLength = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+    const merged = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(new Uint8Array(chunk), offset);
+      offset += chunk.byteLength;
+    }
+
+    const audioBase64 = arrayBufferToBase64(merged.buffer);
+
+    this.abortController = new AbortController();
+
+    try {
+      const response = await fetch(STEPFUN_ASR_SSE_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          audio: {
+            data: audioBase64,
+            input: {
+              transcription: {
+                language: this.config.language,
+                model: this.config.model,
+                enable_itn: true,
+              },
+              format: {
+                type: "pcm",
+                codec: "pcm_s16le",
+                rate: this.config.sampleRate,
+                bits: 16,
+                channel: 1,
+              },
+            },
+          },
+        }),
+        signal: this.abortController.signal,
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        callbacks.onError(new Error(`ASR request failed: ${response.status} ${text}`));
+        return;
+      }
+
+      await this.parseSSE(response, callbacks);
+    } catch (err) {
+      if ((err as Error).name === "AbortError") return;
+      callbacks.onError(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  private async parseSSE(
+    response: Response,
+    callbacks: ASRStreamCallbacks
+  ): Promise<void> {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      callbacks.onError(new Error("No response body"));
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") return;
+
+        try {
+          const event = JSON.parse(data);
+          if (event.type === "transcript.text.delta" && event.delta) {
+            callbacks.onPartial(event.delta);
+          } else if (event.type === "transcript.text.done" && event.text) {
+            callbacks.onFinal(event.text);
+          } else if (event.type === "error") {
+            callbacks.onError(new Error(event.message ?? "ASR error"));
+          }
+        } catch {
+          // skip malformed lines
+        }
+      }
+    }
+  }
+
+  dispose(): void {
+    this.abortController?.abort();
+    this.abortController = null;
   }
 }

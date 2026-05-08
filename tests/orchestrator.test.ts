@@ -91,7 +91,7 @@ describe("AgentOrchestrator", () => {
     expect(result).toBe("");
   });
 
-  it("abort injects interrupt summary and new user input into history", async () => {
+  it("abort injects interrupt summary into history", async () => {
     let capturedMessages: LLMRequest["messages"] = [];
     const provider: LLMProvider = {
       id: "fake",
@@ -114,10 +114,10 @@ describe("AgentOrchestrator", () => {
     // First run to establish history
     await orch.run("do something");
 
-    // Simulate interrupt with new input
-    orch.abort("actually do this instead");
+    // Simulate interrupt
+    orch.abort();
 
-    // Next run should include the interrupt context
+    // Next run with new input
     await orch.run("actually do this instead");
 
     const systemMsgs = capturedMessages.filter((m) => m.role === "system");

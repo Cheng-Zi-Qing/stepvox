@@ -81,7 +81,7 @@ export class AgentOrchestrator {
     this.pendingResults = [];
     return finalContent;
   }
-  abort(newInput: string): void {
+  abort(): void {
     this.interrupted = true;
     if (this.abortController) {
       this.abortController.abort();
@@ -99,8 +99,6 @@ export class AgentOrchestrator {
         content: `[Interrupted] Actions taken so far: ${summary}. User's new input follows. Report what was done and ask how to proceed.`,
       });
     }
-
-    this.history.push({ role: "user", content: newInput });
   }
 
   clearHistory(): void {
