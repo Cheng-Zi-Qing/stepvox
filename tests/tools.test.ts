@@ -7,7 +7,6 @@ describe("getToolLayer", () => {
     expect(getToolLayer("search")).toBe("read");
     expect(getToolLayer("list_files")).toBe("read");
     expect(getToolLayer("get_properties")).toBe("read");
-    expect(getToolLayer("get_active_file")).toBe("read");
   });
 
   it("classifies write tools correctly", () => {

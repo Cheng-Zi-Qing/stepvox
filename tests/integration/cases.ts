@@ -55,7 +55,7 @@ export function buildCases(): TestCase[] {
       },
     },
     {
-      name: "R5: get_active_file",
+      name: "R5: active file handled via injected system prompt (no tool needed)",
       setup: async (app) => {
         const existing = app.vault.getAbstractFileByPath(`${TEST_DIR}/active-test.md`);
         if (!existing) await app.vault.create(`${TEST_DIR}/active-test.md`, "active file");
@@ -64,12 +64,11 @@ export function buildCases(): TestCase[] {
       },
       input: "我现在打开的是什么文件",
       assert: async (result, _app, toolLog) => {
-        const toolUsed = toolLog.some((c) => c.name === "get_active_file");
+        // D47: get_active_file tool is removed. LLM should answer from the active file
+        // path that's injected into the system prompt, without calling any tool.
         const mentionsFile = result.toLowerCase().includes("active-test");
-        if (toolUsed || mentionsFile) {
-          return { pass: true, detail: toolUsed ? "Tool called" : "Correct file mentioned in response" };
-        }
-        return { pass: false, detail: `Neither tool called nor file mentioned. Tools: [${toolLog.map(c => c.name).join(", ")}], response: ${result.slice(0, 80)}` };
+        if (mentionsFile) return { pass: true, detail: "File mentioned in response (no tool call needed)" };
+        return { pass: false, detail: `Response did not mention active file. Tools: [${toolLog.map(c => c.name).join(", ")}], response: ${result.slice(0, 80)}` };
       },
       teardown: async (app) => {
         const f = app.vault.getAbstractFileByPath(`${TEST_DIR}/active-test.md`);

@@ -46,11 +46,6 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-    name: "get_active_file",
-    description: "Get info about the currently active file",
-    parameters: { type: "object", properties: {} },
-  },
-  {
     name: "create_file",
     description: "Create a new note",
     parameters: {
@@ -160,7 +155,6 @@ const TOOL_LAYERS: Record<string, ToolLayer> = {
   search: "read",
   list_files: "read",
   get_properties: "read",
-  get_active_file: "read",
   create_file: "write",
   append: "write",
   prepend: "write",

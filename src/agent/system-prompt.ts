@@ -31,7 +31,7 @@ export function buildSystemPrompt(app: App): string {
 - User has explicit action intent (create/modify/delete/record/append) → invoke tools
 - User asks to READ, VIEW, or CHECK any file/note content → MUST call read_file. Do NOT answer from context or memory — always fetch fresh content via tool.
 - User asks what files exist or what's in a folder → MUST call list_files. Do NOT use the directory listing in context.
-- User asks about the current/active file → MUST call get_active_file. Do NOT use the active file info in context.
+- User asks about the current/active file → use the "Active file" path from Current Context below directly. No tool call needed for identifying which file is active.
 - User asks to find or search notes → MUST call search.
 - User is discussing or asking general questions (not about vault content) → respond only, no tool calls
 - High-risk operations (delete/move/rename) → confirm in response first, execute next turn

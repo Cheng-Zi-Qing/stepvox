@@ -60,8 +60,6 @@ export class ToolExecutor {
         return this.listFiles(args.folder as string | undefined);
       case "get_properties":
         return this.getProperties(args.path as string);
-      case "get_active_file":
-        return this.getActiveFile();
       case "create_file":
         return this.createFile(args.path as string, args.content as string);
       case "append":
@@ -158,14 +156,6 @@ export class ToolExecutor {
     const fm = cache?.frontmatter;
     if (!fm) return Promise.resolve("No frontmatter.");
     return Promise.resolve(JSON.stringify(fm, null, 2));
-  }
-
-  private getActiveFile(): Promise<string> {
-    const file = this.app.workspace.getActiveFile();
-    if (!file) return Promise.resolve("No active file.");
-    return Promise.resolve(
-      JSON.stringify({ path: file.path, name: file.basename, folder: file.parent?.path })
-    );
   }
 
   private async createFile(path: string, content: string): Promise<string> {

@@ -14,7 +14,6 @@ const TOOL_NAME_ZH: Record<string, string> = {
   list_files: "列出文件",
   search: "搜索笔记",
   get_properties: "读取属性",
-  get_active_file: "获取当前文件",
   create_file: "创建文件",
   append: "追加内容",
   prepend: "插入内容",
