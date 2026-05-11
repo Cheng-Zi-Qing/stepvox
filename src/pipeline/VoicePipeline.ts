@@ -31,6 +31,12 @@ import { getASREndpoint, getTTSEndpoint } from "../utils/endpoint";
 import { PerformanceTracker } from "../utils/performance-stats";
 import type { PerformanceMetrics } from "../utils/performance-stats";
 import { debugLog, initDebugLogger } from "../utils/debug-logger";
+import { withTimeout } from "../utils/timeout";
+
+// D48: ASR/TTS hard timeouts (LLM/tool timeouts are in orchestrator)
+const ASR_CONNECT_TIMEOUT_MS = 5_000;
+const ASR_FINAL_TIMEOUT_MS = 5_000;
+const TTS_SYNTH_TIMEOUT_MS = 10_000;
 
 export interface PipelineCallbacks {
   onStateChange: (state: PipelineState) => void;
@@ -57,6 +63,7 @@ export class VoicePipeline {
   private toolExecutor: ToolExecutor;
 
   private asrSession: ASRStreamSession | null = null;
+  private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
   private providerDirty = true;
   private perfTracker = new PerformanceTracker();
   private ttsChain: Promise<void> = Promise.resolve();
@@ -130,6 +137,7 @@ export class VoicePipeline {
     this.recorder.stop();
     this.asrSession?.close();
     this.asrSession = null;
+    this.clearAsrFinalTimer();
     this.clearSessionTimers();
 
     if (this.state === "thinking") {
@@ -173,18 +181,28 @@ export class VoicePipeline {
 
     try {
       debugLog("ASR", "creating ASR session");
-      this.asrSession = await asrProvider.startStreaming({
-        onPartial: (text) => this.callbacks.onPartialTranscript(text),
-        onFinal: (text) => {
-          debugLog("ASR", `onFinal callback triggered, text length: ${text.length}`);
-          this.handleTranscript(text, sessionMode);
-        },
-        onError: (err) => this.handleError(err.message),
-      });
+      this.asrSession = await withTimeout(
+        asrProvider.startStreaming({
+          onPartial: (text) => this.callbacks.onPartialTranscript(text),
+          onFinal: (text) => {
+            debugLog("ASR", `onFinal callback triggered, text length: ${text.length}`);
+            this.clearAsrFinalTimer();
+            this.handleTranscript(text, sessionMode);
+          },
+          onError: (err) => {
+            this.clearAsrFinalTimer();
+            this.handleError(err.message);
+          },
+        }),
+        ASR_CONNECT_TIMEOUT_MS,
+        `ASR connection timed out after ${ASR_CONNECT_TIMEOUT_MS / 1000}s`
+      );
       debugLog("ASR", "ASR session created, starting recorder");
       await this.recorder.start();
       debugLog("ASR", "recorder started, now listening");
     } catch (err) {
+      this.asrSession?.close();
+      this.asrSession = null;
       this.handleError(
         err instanceof Error ? err.message : "Failed to start listening"
       );
@@ -220,6 +238,7 @@ export class VoicePipeline {
     if (wasListening && this.asrSession) {
       // If was listening, commit to get transcription
       this.asrSession.commit();
+      this.armAsrFinalTimer();
       this.setState("transcribing");
     } else {
       // Otherwise, immediately go to idle
@@ -476,7 +495,11 @@ export class VoicePipeline {
 
       try {
         debugLog("TTS", `starting synthesis, text length: ${cleanText.length}`);
-        const { audioData } = await tts.synthesize({ text: cleanText });
+        const { audioData } = await withTimeout(
+          tts.synthesize({ text: cleanText }),
+          TTS_SYNTH_TIMEOUT_MS,
+          `TTS synthesis timed out after ${TTS_SYNTH_TIMEOUT_MS / 1000}s`
+        );
         debugLog("TTS", `synthesis completed, audio size: ${audioData.byteLength} bytes`);
 
         // Check again after synthesis (in case aborted during synthesis)
@@ -495,6 +518,7 @@ export class VoicePipeline {
   }
 
   private handleError(message: string): void {
+    this.clearAsrFinalTimer();
     this.vadEnabled = false;
     this.resetVAD();
     this.recorder.stop();
@@ -505,6 +529,22 @@ export class VoicePipeline {
     this.clearSessionTimers();
     this.setState("idle");
     this.callbacks.onError(message);
+  }
+
+  private armAsrFinalTimer(): void {
+    this.clearAsrFinalTimer();
+    this.asrFinalTimer = setTimeout(() => {
+      this.asrFinalTimer = null;
+      debugLog("ASR", `final transcript timed out after ${ASR_FINAL_TIMEOUT_MS / 1000}s`);
+      this.handleError(`ASR final transcript timed out after ${ASR_FINAL_TIMEOUT_MS / 1000}s`);
+    }, ASR_FINAL_TIMEOUT_MS);
+  }
+
+  private clearAsrFinalTimer(): void {
+    if (this.asrFinalTimer) {
+      clearTimeout(this.asrFinalTimer);
+      this.asrFinalTimer = null;
+    }
   }
 
   private setState(state: PipelineState): void {
@@ -611,6 +651,7 @@ export class VoicePipeline {
         if (this.settings.interaction.enableSessionMode && this.asrSession) {
           debugLog("VAD", "committing ASR and restarting session for barge-in");
           this.asrSession.commit();
+          this.armAsrFinalTimer();
           this.setState("transcribing");
 
           // Start new ASR session immediately to keep recorder active
