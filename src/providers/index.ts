@@ -12,5 +12,6 @@ export type {
 } from "./types";
 export { StepFunASR } from "./stepfun-asr";
 export { StepFunTTS } from "./stepfun-tts";
-export { OpenAILLM } from "./openai-llm";
-export { AnthropicLLM } from "./anthropic-llm";
+export { createLLMProvider } from "./llm/factory";
+export { OpenAIProvider } from "./llm/openai";
+export { AnthropicProvider } from "./llm/anthropic";

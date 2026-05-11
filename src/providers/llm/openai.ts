@@ -6,7 +6,7 @@ import type {
   ToolCall,
 } from "./types";
 
-interface OpenAILLMConfig {
+interface OpenAIConfig {
   endpoint: string;
   apiKey: string;
   model: string;
@@ -19,29 +19,49 @@ interface OpenAIToolCall {
   function: { name: string; arguments: string };
 }
 
-interface OpenAIChoice {
-  message: {
-    content?: string | null;
-    tool_calls?: OpenAIToolCall[];
-  };
-}
+export class OpenAIProvider implements LLMProvider {
+  readonly id = "openai-provider";
+  readonly name = "OpenAI Compatible Provider";
 
-export class OpenAILLM implements LLMProvider {
-  readonly id = "openai-llm";
-  readonly name = "OpenAI Compatible LLM";
+  private config: OpenAIConfig;
+  private chatURL: string;
 
-  private config: OpenAILLMConfig;
-  private baseURL: string;
-
-  constructor(config: OpenAILLMConfig) {
-    this.config = config;
-    this.baseURL = this.normalizeEndpoint(config.endpoint);
+  constructor(endpoint: string, apiKey: string, model: string, temperature: number) {
+    this.config = { endpoint, apiKey, model, temperature };
+    this.chatURL = this.buildChatURL(endpoint);
   }
 
   async chat(request: LLMRequest): Promise<LLMResponse> {
+    // Convert messages to OpenAI format
+    const apiMessages = request.messages.map((msg) => {
+      const apiMsg: any = {
+        role: msg.role,
+        content: msg.content,
+      };
+
+      // Convert tool_calls from internal format to OpenAI format
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        apiMsg.tool_calls = msg.tool_calls.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.args),
+          },
+        }));
+      }
+
+      // Add tool_call_id for tool role messages
+      if (msg.tool_call_id) {
+        apiMsg.tool_call_id = msg.tool_call_id;
+      }
+
+      return apiMsg;
+    });
+
     const body: Record<string, unknown> = {
       model: this.config.model,
-      messages: request.messages,
+      messages: apiMessages,
       temperature: this.config.temperature,
     };
 
@@ -56,7 +76,7 @@ export class OpenAILLM implements LLMProvider {
       }));
     }
 
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
+    const response = await fetch(this.chatURL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,
@@ -68,10 +88,10 @@ export class OpenAILLM implements LLMProvider {
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      throw new Error(`LLM request failed (${response.status}): ${text}`);
+      throw new Error(`OpenAI API error (${response.status}): ${text}`);
     }
 
-    const data = (await response.json()) as { choices?: OpenAIChoice[] };
+    const data = await response.json();
     const msg = data.choices?.[0]?.message;
     if (!msg) {
       throw new Error("LLM response missing message");
@@ -81,7 +101,7 @@ export class OpenAILLM implements LLMProvider {
       (tc: OpenAIToolCall) => ({
         id: tc.id,
         name: tc.function.name,
-        args: JSON.parse(tc.function.arguments) as Record<string, unknown>,
+        args: JSON.parse(tc.function.arguments),
       })
     );
 
@@ -104,11 +124,12 @@ export class OpenAILLM implements LLMProvider {
 
   dispose(): void {}
 
-  private normalizeEndpoint(endpoint: string): string {
-    let url = endpoint.trim().replace(/\/+$/, "");
-    if (!url.endsWith("/v1")) {
-      url += "/v1";
+  private buildChatURL(endpoint: string): string {
+    const url = endpoint.trim().replace(/\/+$/, "");
+    if (/\/chat\/completions?$/.test(url)) {
+      return url;
     }
-    return url;
+    const base = url.endsWith("/v1") ? url : `${url}/v1`;
+    return `${base}/chat/completions`;
   }
 }

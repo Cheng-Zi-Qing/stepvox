@@ -1,6 +1,7 @@
 import { App, TFile, TFolder } from "obsidian";
 import type { ToolCall } from "../providers";
 import { getToolLayer } from "./tools";
+import type { SearchProvider } from "../providers/search";
 
 export interface ToolResult {
   id: string;
@@ -8,30 +9,22 @@ export interface ToolResult {
   success: boolean;
 }
 
+/**
+ * ToolExecutor — pure execution, no timeouts, no async-pending state.
+ * Timeouts and parallelism are the orchestrator's responsibility (D46/D48).
+ */
 export class ToolExecutor {
   private app: App;
-  private focusDir: string;
   private memoryDir: string;
+  private searchProvider: SearchProvider | null = null;
 
   constructor(app: App, memoryDir: string) {
     this.app = app;
     this.memoryDir = memoryDir;
-    this.focusDir = "";
   }
 
-  get currentFocus(): string {
-    return this.focusDir;
-  }
-
-  setFocus(dir: string): void {
-    this.focusDir = dir;
-  }
-
-  syncFocusFromActiveFile(): void {
-    const file = this.app.workspace.getActiveFile();
-    if (file?.parent) {
-      this.focusDir = file.parent.path;
-    }
+  setSearchProvider(provider: SearchProvider | null): void {
+    this.searchProvider = provider;
   }
 
   async execute(call: ToolCall): Promise<ToolResult> {
@@ -89,17 +82,17 @@ export class ToolExecutor {
         );
       case "open_file":
         return this.openFile(args.path as string);
-      case "set_focus":
-        this.focusDir = args.path as string;
-        return `Focus set to: ${this.focusDir}`;
       case "read_memory":
         return this.readMemory();
       case "update_memory":
         return this.updateMemory(args.content as string);
+      case "web_search":
+        return this.webSearch(args.query as string);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
   }
+
   private resolveFile(path: string): TFile {
     let resolved = path;
     if (!resolved.endsWith(".md")) resolved += ".md";
@@ -144,13 +137,12 @@ export class ToolExecutor {
   }
 
   private listFiles(folder?: string): Promise<string> {
-    const dir = folder ?? this.focusDir;
-    const abstract = dir
-      ? this.app.vault.getAbstractFileByPath(dir)
+    const abstract = folder
+      ? this.app.vault.getAbstractFileByPath(folder)
       : this.app.vault.getRoot();
 
     if (!abstract || !(abstract instanceof TFolder)) {
-      return Promise.resolve(`Folder not found: ${dir}`);
+      return Promise.resolve(`Folder not found: ${folder ?? "(root)"}`);
     }
 
     const entries = abstract.children
@@ -255,5 +247,14 @@ export class ToolExecutor {
     const end = data.indexOf("---", 3);
     if (end === -1) return 0;
     return end + 3 + (data[end + 3] === "\n" ? 1 : 0);
+  }
+
+  private async webSearch(query: string): Promise<string> {
+    if (!this.searchProvider) return "Web search not configured. Please add a search API key in settings.";
+    const results = await this.searchProvider.search(query);
+    if (results.length === 0) return "No results found.";
+    return results
+      .map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content}`)
+      .join("\n\n---\n\n");
   }
 }

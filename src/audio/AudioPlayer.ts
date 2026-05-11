@@ -45,15 +45,17 @@ export class AudioPlayer {
       this.currentSource.buffer = audioBuffer;
       this.currentSource.connect(this.context.destination);
 
-      this.currentSource.onended = () => {
-        this.currentSource = null;
-        this.playing = false;
-        this.emit("end");
-      };
-
-      this.currentSource.start();
-      this.playing = true;
-      this.emit("start");
+      await new Promise<void>((resolve) => {
+        this.currentSource!.onended = () => {
+          this.currentSource = null;
+          this.playing = false;
+          this.emit("end");
+          resolve();
+        };
+        this.currentSource!.start();
+        this.playing = true;
+        this.emit("start");
+      });
     } catch (err) {
       if (this.currentSource) {
         this.currentSource.onended = null;

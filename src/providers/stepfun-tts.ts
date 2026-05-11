@@ -1,7 +1,7 @@
 import type { TTSProvider } from "./types";
-import { STEPFUN_TTS_ENDPOINT } from "../constants";
 
 interface StepFunTTSConfig {
+  endpoint: string;
   apiKey: string;
   model: string;
   voice: string;
@@ -34,7 +34,7 @@ export class StepFunTTS implements TTSProvider {
       throw new Error("TTS: empty text");
     }
 
-    const response = await fetch(STEPFUN_TTS_ENDPOINT, {
+    const response = await fetch(this.config.endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${this.config.apiKey}`,

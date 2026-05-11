@@ -5,8 +5,6 @@ export interface AudioFormat {
   encoding: "pcm" | "wav" | "mp3" | "opus";
 }
 
-export type InteractionMode = "push-to-talk" | "wake-word";
-
 export type PipelineState =
   | "idle"
   | "listening"

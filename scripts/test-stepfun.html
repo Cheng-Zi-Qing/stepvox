@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StepFun API 连通性测试</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 900px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    h1 {
+      margin-top: 0;
+      color: #333;
+    }
+    .input-group {
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #555;
+    }
+    input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 4px;
+      font-size: 16px;
+      cursor: pointer;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    #log {
+      margin-top: 20px;
+      padding: 15px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      border-radius: 4px;
+      font-family: "Courier New", monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      max-height: 500px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .success { color: #4caf50; }
+    .error { color: #f44336; }
+    .info { color: #2196f3; }
+    .warning { color: #ff9800; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>StepFun API 连通性测试</h1>
+
+    <div class="input-group">
+      <label for="apiKey">StepFun API Key:</label>
+      <input type="password" id="apiKey" placeholder="输入你的 API Key">
+    </div>
+
+    <button id="testBtn" onclick="runTests()">开始测试</button>
+    <button onclick="clearLog()">清空日志</button>
+
+    <div id="log"></div>
+  </div>
+
+  <script>
+    const log = document.getElementById('log');
+    const testBtn = document.getElementById('testBtn');
+
+    function addLog(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const span = document.createElement('span');
+      span.className = type;
+      span.textContent = `[${timestamp}] ${message}\n`;
+      log.appendChild(span);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function clearLog() {
+      log.innerHTML = '';
+    }
+
+    async function testEndpoint(name, url, apiKey) {
+      addLog(`\n测试 ${name}`, 'info');
+      addLog(`URL: ${url}`, 'info');
+
+      const payload = {
+        model: "step-3.5-flash",
+        messages: [
+          {
+            role: "system",
+            content: "你是由阶跃星辰提供的AI聊天助手，你擅长中文，英文，以及多种其他语言的对话。在保证用户数据安全的前提下，你能对用户的问题和请求，作出快速和精准的回答。同时，你的回答和建议应该拒绝黄赌毒，暴力恐怖主义的内容"
+          },
+          {
+            role: "user",
+            content: "你好，请回复'OK'确认收到消息。"
+          }
+        ],
+        max_tokens: 50
+      };
+
+      try {
+        addLog('发送请求...', 'info');
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const text = await response.text();
+
+        if (response.ok) {
+          addLog(`✓ ${name} 成功 (${response.status})`, 'success');
+          addLog(`响应: ${text.substring(0, 200)}`, 'success');
+          return true;
+        } else {
+          addLog(`✗ ${name} 失败 (${response.status})`, 'error');
+          addLog(`错误: ${text.substring(0, 200)}`, 'error');
+          return false;
+        }
+      } catch (error) {
+        addLog(`✗ ${name} 异常: ${error.message}`, 'error');
+        return false;
+      }
+    }
+
+    async function runTests() {
+      const apiKey = document.getElementById('apiKey').value.trim();
+
+      if (!apiKey) {
+        addLog('请输入 API Key', 'error');
+        return;
+      }
+
+      testBtn.disabled = true;
+      clearLog();
+
+      addLog('=== 开始测试 StepFun API 连通性 ===', 'info');
+      addLog(`API Key: ${apiKey.substring(0, 10)}...`, 'info');
+
+      const results = [];
+
+      results.push(await testEndpoint(
+        '国内 + API',
+        'https://api.stepfun.com/v1/chat/completions',
+        apiKey
+      ));
+
+      results.push(await testEndpoint(
+        '国内 + Coding Plan',
+        'https://api.stepfun.com/step_plan/v1/chat/completions',
+        apiKey
+      ));
+
+      addLog('\n=== 测试总结 ===', 'info');
+      addLog(`国内 + API: ${results[0] ? '✓ 通过' : '✗ 失败'}`, results[0] ? 'success' : 'error');
+      addLog(`国内 + Coding Plan: ${results[1] ? '✓ 通过' : '✗ 失败'}`, results[1] ? 'success' : 'error');
+
+      const allPassed = results.every(r => r);
+      addLog(`\n总体结果: ${allPassed ? '✓ 全部通过' : '✗ 部分失败'}`, allPassed ? 'success' : 'error');
+
+      testBtn.disabled = false;
+    }
+  </script>
+</body>
+</html>

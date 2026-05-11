@@ -42,6 +42,12 @@ export default class StepVoxPlugin extends Plugin {
       onError: (message) => {
         this.getView()?.showError(message);
       },
+      onPerformanceMetrics: (metrics) => {
+        this.getView()?.addPerformanceMetrics(metrics);
+      },
+      onSessionActiveChange: (active) => {
+        this.getView()?.setSessionMode(active);
+      },
     };
 
     this.pipeline = new VoicePipeline(this.app, this.settings, callbacks);
@@ -49,6 +55,7 @@ export default class StepVoxPlugin extends Plugin {
     this.registerView(VIEW_TYPE_STEPVOX, (leaf) => {
       const view = new StepVoxView(leaf);
       view.setOnToggle(() => this.toggleRecording());
+      view.setOnClearHistory(() => this.pipeline.clearHistory());
       return view;
     });
 
@@ -85,6 +92,12 @@ export default class StepVoxPlugin extends Plugin {
         if (this.isRecording) this.toggleRecording();
       },
     });
+
+    this.addCommand({
+      id: "toggle-session-mode",
+      name: "Toggle session mode",
+      callback: () => this.toggleSessionMode(),
+    });
   }
 
   onunload(): void {
@@ -94,28 +107,42 @@ export default class StepVoxPlugin extends Plugin {
   async loadSettings(): Promise<void> {
     const saved = (await this.loadData()) ?? {};
     this.settings = {
+      stepfun: { ...DEFAULT_SETTINGS.stepfun, ...saved.stepfun },
       asr: { ...DEFAULT_SETTINGS.asr, ...saved.asr },
       tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts },
       llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
       interaction: { ...DEFAULT_SETTINGS.interaction, ...saved.interaction },
       audio: { ...DEFAULT_SETTINGS.audio, ...saved.audio },
       execution: { ...DEFAULT_SETTINGS.execution, ...saved.execution },
+      search: { ...DEFAULT_SETTINGS.search, ...saved.search },
     };
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
     this.pipeline.onSettingsChanged(this.settings);
+    // Sync UI state with settings
+    this.getView()?.setSessionMode(this.settings.interaction.enableSessionMode);
   }
 
   private toggleRecording(): void {
     if (this.isRecording) {
+      // Stop current session
+      console.log("[Mic Button] terminating current session");
       this.isRecording = false;
       this.pipeline.stopListening();
     } else {
+      // Start new session
+      console.log("[Mic Button] starting session (sessionMode=" + this.settings.interaction.enableSessionMode + ")");
       this.isRecording = true;
-      void this.pipeline.startListening();
+      void this.pipeline.startListening(this.settings.interaction.enableSessionMode);
     }
+  }
+
+  private toggleSessionMode(): void {
+    this.settings.interaction.enableSessionMode = !this.settings.interaction.enableSessionMode;
+    void this.saveSettings();
+    this.getView()?.setSessionMode(this.settings.interaction.enableSessionMode);
   }
 
   private getView(): StepVoxView | null {

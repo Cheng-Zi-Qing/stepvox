@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getToolLayer } from "../src/agent/tools";
+import { getToolLayer, TOOL_DEFINITIONS } from "../src/agent/tools";
 
 describe("getToolLayer", () => {
   it("classifies read tools correctly", () => {
@@ -20,9 +20,16 @@ describe("getToolLayer", () => {
   });
 
   it("classifies system tools correctly", () => {
-    expect(getToolLayer("set_focus")).toBe("system");
     expect(getToolLayer("read_memory")).toBe("system");
     expect(getToolLayer("update_memory")).toBe("system");
+  });
+
+  it("set_focus is removed — treated as dangerous (unknown)", () => {
+    expect(getToolLayer("set_focus")).toBe("dangerous");
+  });
+
+  it("TOOL_DEFINITIONS does not contain set_focus", () => {
+    expect(TOOL_DEFINITIONS.find((t) => t.name === "set_focus")).toBeUndefined();
   });
 
   it("defaults unknown tools to dangerous", () => {

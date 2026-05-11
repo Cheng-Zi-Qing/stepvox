@@ -3,10 +3,10 @@ import type {
   ASRStreamCallbacks,
   ASRStreamSession,
 } from "./types";
-import { STEPFUN_ASR_SSE_ENDPOINT } from "../constants";
 import { float32ToPCM16, arrayBufferToBase64 } from "./utils";
 
 interface StepFunASRConfig {
+  endpoint: string;
   apiKey: string;
   model: string;
   language: string;
@@ -68,7 +68,7 @@ export class StepFunASR implements ASRProvider {
     this.abortController = new AbortController();
 
     try {
-      const response = await fetch(STEPFUN_ASR_SSE_ENDPOINT, {
+      const response = await fetch(this.config.endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

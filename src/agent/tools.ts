@@ -30,7 +30,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     parameters: {
       type: "object",
       properties: {
-        folder: { type: "string", description: "Folder path (default: focus directory)" },
+        folder: { type: "string", description: "Folder path (default: vault root)" },
       },
     },
   },
@@ -88,13 +88,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: "update_content",
-    description: "Replace a specific text segment in a note",
+    description:
+      "Find and replace text in a note. Use this when the user asks to change, replace, or modify specific text in a file.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "File path" },
-        old_text: { type: "string", description: "Text to find" },
-        new_text: { type: "string", description: "Replacement text" },
+        path: { type: "string", description: "File path (without .md extension)" },
+        old_text: { type: "string", description: "Exact text to find in the file" },
+        new_text: { type: "string", description: "Text to replace it with" },
       },
       required: ["path", "old_text", "new_text"],
     },
@@ -124,14 +125,14 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-    name: "set_focus",
-    description: "Switch working directory focus",
+    name: "web_search",
+    description: "Search the web for current information. Use when user asks about external content, recent events, or anything not in the vault.",
     parameters: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Directory path to focus on" },
+        query: { type: "string", description: "Search query" },
       },
-      required: ["path"],
+      required: ["query"],
     },
   },
   {
@@ -166,7 +167,7 @@ const TOOL_LAYERS: Record<string, ToolLayer> = {
   update_content: "write",
   set_property: "write",
   open_file: "write",
-  set_focus: "system",
+  web_search: "read",
   read_memory: "system",
   update_memory: "system",
 };
