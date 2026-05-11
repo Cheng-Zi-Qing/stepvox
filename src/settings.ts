@@ -59,6 +59,9 @@ export interface StepVoxSettings {
     provider: "tavily" | "exa" | "none";
     apiKey: string;
   };
+  debug: {
+    enabled: boolean;
+  };
 }
 
 export const DEFAULT_SETTINGS: StepVoxSettings = {
@@ -99,6 +102,9 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
   search: {
     provider: "none",
     apiKey: "",
+  },
+  debug: {
+    enabled: false,
   },
 };
 
@@ -445,6 +451,20 @@ export class StepVoxSettingTab extends PluginSettingTab {
             })
         );
     }
+
+    // Debug
+    new Setting(containerEl).setName("Debug").setHeading();
+    new Setting(containerEl)
+      .setName("Debug mode")
+      .setDesc("在浏览器 console 输出调试日志，并写入 .obsidian/plugins/stepvox/debug.log")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.debug.enabled)
+          .onChange(async (value) => {
+            this.plugin.settings.debug.enabled = value;
+            await this.plugin.saveSettings();
+          })
+      );
   }
 
   private buildTestURL(endpoint: string, format: string): string {

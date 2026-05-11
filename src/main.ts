@@ -6,6 +6,7 @@ import { StepVoxView } from "./ui/StepVoxView";
 import { StatusBarWidget } from "./ui/StatusBarWidget";
 import { VoicePipeline } from "./pipeline";
 import type { PipelineCallbacks } from "./pipeline";
+import { debugLog, initDebugLogger, maybeRotateLog, setDebugEnabled } from "./utils/debug-logger";
 
 export default class StepVoxPlugin extends Plugin {
   settings!: StepVoxSettings;
@@ -15,6 +16,12 @@ export default class StepVoxPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    initDebugLogger(this.app);
+    setDebugEnabled(this.settings.debug.enabled);
+    maybeRotateLog();
+    // Re-check daily so long-running sessions also rotate.
+    this.registerInterval(window.setInterval(() => maybeRotateLog(), 24 * 60 * 60 * 1000));
 
     const callbacks: PipelineCallbacks = {
       onStateChange: (state) => {
@@ -118,11 +125,13 @@ export default class StepVoxPlugin extends Plugin {
       interaction: { ...DEFAULT_SETTINGS.interaction, ...saved.interaction },
       audio: { ...DEFAULT_SETTINGS.audio, ...saved.audio },
       search: { ...DEFAULT_SETTINGS.search, ...saved.search },
+      debug: { ...DEFAULT_SETTINGS.debug, ...saved.debug },
     };
   }
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    setDebugEnabled(this.settings.debug.enabled);
     this.pipeline.onSettingsChanged(this.settings);
     // Sync UI state with settings
     this.getView()?.setSessionMode(this.settings.interaction.enableSessionMode);
@@ -131,12 +140,12 @@ export default class StepVoxPlugin extends Plugin {
   private toggleRecording(): void {
     if (this.isRecording) {
       // Stop current session — hard cancel any in-flight work
-      console.log("[Mic Button] terminating current session");
+      debugLog("MIC", "terminating current session");
       this.isRecording = false;
       this.pipeline.cancel();
     } else {
       // Start new session
-      console.log("[Mic Button] starting session (sessionMode=" + this.settings.interaction.enableSessionMode + ")");
+      debugLog("MIC", `starting session sessionMode=${this.settings.interaction.enableSessionMode}`);
       this.isRecording = true;
       void this.pipeline.startSession(this.settings.interaction.enableSessionMode);
     }
