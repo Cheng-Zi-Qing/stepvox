@@ -1,6 +1,6 @@
 import type { LLMProvider, LLMMessage, ToolCall, ToolDefinition } from "../providers";
 import { ToolExecutor, type ToolResult } from "./tool-executor";
-import { routeTools } from "./route";
+import { TOOL_DEFINITIONS } from "./tools";
 import { debugLog } from "../utils/debug-logger";
 
 // D48: layered timeouts
@@ -59,7 +59,7 @@ export class AgentOrchestrator {
     this.history.push({ role: "user", content: userInput });
 
     const messages = this.buildMessages();
-    const tools = routeTools(userInput);
+    const tools = TOOL_DEFINITIONS;
 
     // ----- Round 1 -----
     const r1 = await this.callLLM(messages, tools);
@@ -85,6 +85,14 @@ export class AgentOrchestrator {
     if (this.interrupted) return "";
     this.pushToolResults(messages, r1Results);
 
+    // Build a signature set of what R1 already asked for. We use this to
+    // detect R2 asking the LLM to call the same tool with the same args,
+    // which is a common dead-end with step-3.5-flash: the model does not
+    // know how to synthesise the R1 result, so it just asks for it again.
+    const r1Signatures = new Set<string>(
+      r1.response!.toolCalls.map((c) => callSignature(c))
+    );
+
     // ----- Round 2 -----
     const r2 = await this.callLLM(messages, tools);
     if (this.interrupted) return "";
@@ -103,11 +111,39 @@ export class AgentOrchestrator {
       tool_calls: r2.response!.toolCalls,
     });
 
-    const r2Results = await this.runToolPhase(r2.response!.toolCalls, callbacks);
+    // Partition R2's tool calls into "new" (actually novel) and "duplicate"
+    // (same tool + same args as R1). Duplicates are short-circuited with a
+    // reminder — we do NOT re-execute, which would just waste time and
+    // pile identical output into the context window.
+    const { novelCalls, duplicateCalls } = partitionCalls(r2.response!.toolCalls, r1Signatures);
+    let duplicateLoopDetected = false;
+    if (duplicateCalls.length > 0) {
+      duplicateLoopDetected = duplicateCalls.length === r2.response!.toolCalls.length;
+      for (const dup of duplicateCalls) {
+        debugLog("LOOP", `R2 duplicate tool ${dup.name} ${JSON.stringify(dup.args ?? {})} — short-circuiting`);
+        messages.push({
+          role: "tool",
+          content:
+            "This tool has already been called with the same arguments in this turn. The previous result is in the conversation above — use it instead of asking again.",
+          tool_call_id: dup.id,
+        });
+      }
+    }
+
+    const r2Results = novelCalls.length > 0
+      ? await this.runToolPhase(novelCalls, callbacks)
+      : [];
     if (this.interrupted) return "";
     this.pushToolResults(messages, r2Results);
 
     // ----- Round 3: forced summary, no tools -----
+    // Some providers (observed on step-3.5-flash) still emit <tool_call>
+    // XML in content even when tools=[]. Prepend a terse instruction
+    // hammering home: prose only, use what's already in history, no markup.
+    const r3Instruction = duplicateLoopDetected
+      ? "This is the final answer turn. You just repeated the same tool call you already made in round 1 — that usually means the user's request was ambiguous or the data you got back wasn't what they wanted. DO NOT output any tool call, XML tag, or JSON. Instead ask the user ONE short clarifying question to figure out what they actually want. Respond in the same language they spoke. Maximum 40 characters."
+      : "This is the final answer turn. Do NOT output any tool call, XML tag, JSON, or function-call syntax. Do NOT ask for another tool. Produce a natural spoken summary for the user, using the tool results already in the conversation above. Respond in the same language the user spoke. Maximum 80 Chinese characters or 50 English words, at most three sentences. If you lack the information, say so briefly.";
+    messages.push({ role: "system", content: r3Instruction });
     const r3 = await this.callLLM(messages, []);
     if (this.interrupted) return "";
     const final = !r3.error && r3.response!.content ? r3.response!.content : pickApology();
@@ -248,6 +284,10 @@ export class AgentOrchestrator {
 
   private buildMessages(): LLMMessage[] {
     let systemPrompt = this.systemPromptBuilder();
+    // Surface the injected "now" so a stale system clock or mismatch is
+    // obvious in logs. Only logs the first ~80 chars to avoid spam.
+    const dateMatch = systemPrompt.match(/Today's date:\s*([^\n]+)/);
+    if (dateMatch) debugLog("PROMPT", `injected date: ${dateMatch[1]}`);
 
     if (this.roundCount % MEMORY_HINT_INTERVAL === 0 && this.roundCount > 0) {
       systemPrompt += `\n\n## Memory Hint\nYou have interacted with the user for ${this.roundCount} rounds. If you have discovered user habits, preferences, or information worth remembering long-term, call update_memory to record them.`;
@@ -263,4 +303,22 @@ export class AgentOrchestrator {
       debugLog("HISTORY", `trimmed ${removed} old messages, keeping last ${MAX_HISTORY_MESSAGES}`);
     }
   }
+}
+
+/** Stable signature for a tool call, used to detect "asked for the same thing again". */
+function callSignature(call: ToolCall): string {
+  return `${call.name}|${JSON.stringify(call.args ?? {})}`;
+}
+
+function partitionCalls(
+  calls: ToolCall[],
+  alreadyCalled: Set<string>
+): { novelCalls: ToolCall[]; duplicateCalls: ToolCall[] } {
+  const novelCalls: ToolCall[] = [];
+  const duplicateCalls: ToolCall[] = [];
+  for (const call of calls) {
+    if (alreadyCalled.has(callSignature(call))) duplicateCalls.push(call);
+    else novelCalls.push(call);
+  }
+  return { novelCalls, duplicateCalls };
 }

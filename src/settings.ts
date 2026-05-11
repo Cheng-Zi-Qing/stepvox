@@ -48,7 +48,6 @@ export interface StepVoxSettings {
   };
   interaction: {
     enableSessionMode: boolean;
-    hotkey: string;
     silenceTimeout: number;
   };
   audio: {
@@ -90,7 +89,6 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
   },
   interaction: {
     enableSessionMode: false,
-    hotkey: "Alt+v",
     silenceTimeout: 1500,
   },
   audio: {

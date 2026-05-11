@@ -117,6 +117,15 @@
   font-style: italic;
 }
 
+.stepvox-tool-status {
+  align-self: center;
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-style: italic;
+  opacity: 0.85;
+}
+
 /* Footer mic button */
 .stepvox-footer {
   display: flex;

@@ -39,6 +39,9 @@ export default class StepVoxPlugin extends Plugin {
           timestamp: Date.now(),
         });
       },
+      onToolStatus: (text) => {
+        this.getView()?.setToolStatus(text);
+      },
       onError: (message) => {
         this.getView()?.showError(message);
       },
@@ -46,6 +49,7 @@ export default class StepVoxPlugin extends Plugin {
         this.getView()?.addPerformanceMetrics(metrics);
       },
       onSessionActiveChange: (active) => {
+        this.isRecording = active;
         this.getView()?.setSessionMode(active);
       },
     };
@@ -126,15 +130,15 @@ export default class StepVoxPlugin extends Plugin {
 
   private toggleRecording(): void {
     if (this.isRecording) {
-      // Stop current session
+      // Stop current session — hard cancel any in-flight work
       console.log("[Mic Button] terminating current session");
       this.isRecording = false;
-      this.pipeline.stopListening();
+      this.pipeline.cancel();
     } else {
       // Start new session
       console.log("[Mic Button] starting session (sessionMode=" + this.settings.interaction.enableSessionMode + ")");
       this.isRecording = true;
-      void this.pipeline.startListening(this.settings.interaction.enableSessionMode);
+      void this.pipeline.startSession(this.settings.interaction.enableSessionMode);
     }
   }
 

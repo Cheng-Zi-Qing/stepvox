@@ -80,6 +80,10 @@ export class ToolExecutor {
         );
       case "open_file":
         return this.openFile(args.path as string);
+      case "find_path":
+        return this.findPath(args.query as string, args.type as "file" | "folder" | "both" | undefined);
+      case "move_file":
+        return this.moveFile(args.path as string, args.new_path as string);
       case "read_memory":
         return this.readMemory();
       case "update_memory":
@@ -89,6 +93,44 @@ export class ToolExecutor {
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
+  }
+
+  // ============================================================
+  // VAULT SNAPSHOT — captured once at session start; injected into
+  // system prompt so the LLM has immediate orientation and doesn't
+  // need to waste a round on list_files just to discover the layout.
+  // ============================================================
+
+  /**
+   * Build a two-level string view of the vault's folder tree:
+   *   Top-level folders, each followed by its direct subfolders (indented).
+   * Files are NOT listed — only folder skeleton. Large dirs are capped.
+   */
+  snapshotVaultStructure(): string {
+    const PER_LEVEL_CAP = 30;
+    const root = this.app.vault.getRoot();
+    const topFolders = root.children.filter((c): c is TFolder => c instanceof TFolder).sort((a, b) => a.name.localeCompare(b.name));
+    if (topFolders.length === 0) return "(vault has no subfolders)";
+
+    const lines: string[] = [];
+    const truncated = topFolders.slice(0, PER_LEVEL_CAP);
+    for (const folder of truncated) {
+      lines.push(`${folder.name}/`);
+      const subs = folder.children
+        .filter((c): c is TFolder => c instanceof TFolder)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const subTruncated = subs.slice(0, PER_LEVEL_CAP);
+      for (const sub of subTruncated) {
+        lines.push(`  ${folder.name}/${sub.name}/`);
+      }
+      if (subs.length > PER_LEVEL_CAP) {
+        lines.push(`  ...(+${subs.length - PER_LEVEL_CAP} more subfolders)`);
+      }
+    }
+    if (topFolders.length > PER_LEVEL_CAP) {
+      lines.push(`...(+${topFolders.length - PER_LEVEL_CAP} more top-level folders)`);
+    }
+    return lines.join("\n");
   }
 
   private resolveFile(path: string): TFile {
@@ -147,7 +189,17 @@ export class ToolExecutor {
       .map((c) => (c instanceof TFolder ? `${c.name}/` : c.name))
       .sort();
 
-    return Promise.resolve(entries.join("\n") || "(empty)");
+    if (entries.length === 0) return Promise.resolve("(empty)");
+
+    // Truncate large directories so the LLM context isn't drowned (and to
+    // discourage the model from re-asking when it can't make sense of a
+    // 1000-line listing). Show the first 50 entries with a tail count.
+    const MAX = 50;
+    if (entries.length <= MAX) return Promise.resolve(entries.join("\n"));
+    return Promise.resolve(
+      entries.slice(0, MAX).join("\n") +
+        `\n...(+${entries.length - MAX} more entries; ask the user to narrow down or use search)`
+    );
   }
 
   private getProperties(path: string): Promise<string> {
@@ -212,6 +264,62 @@ export class ToolExecutor {
   private async openFile(path: string): Promise<string> {
     await this.app.workspace.openLinkText(path, "", false);
     return `Opened: ${path}`;
+  }
+
+  /**
+   * find_path — fuzzy name-match across the WHOLE vault (file + folder names).
+   * Use when the LLM knows the rough name of something ("the report", "my
+   * meeting notes folder") but not its full path. Returns up to 30 matches,
+   * prefixed with "[file]" or "[folder]" so the LLM can pick. No file
+   * contents are opened, it's purely a path-layer search.
+   */
+  private async findPath(query: string, kind: "file" | "folder" | "both" = "both"): Promise<string> {
+    const q = (query ?? "").trim().toLowerCase();
+    if (!q) return "find_path needs a non-empty query string.";
+    const MAX = 30;
+
+    // getAllLoadedFiles returns every TAbstractFile (TFile + TFolder) in the vault.
+    const all = this.app.vault.getAllLoadedFiles();
+    const matches: { type: "file" | "folder"; path: string }[] = [];
+
+    for (const f of all) {
+      if (matches.length >= MAX + 1) break; // +1 so we can detect "more"
+      const isFolder = f instanceof TFolder;
+      if (kind === "file" && isFolder) continue;
+      if (kind === "folder" && !isFolder) continue;
+      if (!f.path) continue; // root has empty path
+      const name = (isFolder ? f.name : (f as TFile).basename) ?? "";
+      if (name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)) {
+        matches.push({ type: isFolder ? "folder" : "file", path: f.path });
+      }
+    }
+
+    if (matches.length === 0) return `No paths found matching "${query}".`;
+
+    const shown = matches.slice(0, MAX);
+    const lines = shown.map((m) => `[${m.type}] ${m.path}`);
+    if (matches.length > MAX) lines.push(`...(+${matches.length - MAX} more, narrow the query)`);
+    return lines.join("\n");
+  }
+
+  /**
+   * move_file — move (or rename) a note. If new_path points to an existing
+   * file/folder, this fails rather than overwriting. Vault paths only, no
+   * escaping to outside the vault.
+   */
+  private async moveFile(path: string, newPath: string): Promise<string> {
+    if (!path || !newPath) throw new Error("move_file requires both 'path' and 'new_path'.");
+    const src = this.resolveFile(path);
+
+    // Normalise target: append .md if user omitted (mirrors resolveFile behaviour).
+    let target = newPath;
+    if (!target.endsWith(".md") && !target.endsWith("/")) target += ".md";
+
+    if (this.app.vault.getAbstractFileByPath(target)) {
+      throw new Error(`Target already exists: ${target}. Use a different new_path.`);
+    }
+    await this.app.fileManager.renameFile(src, target);
+    return `Moved: ${src.path} → ${target}`;
   }
 
   private async readMemory(): Promise<string> {

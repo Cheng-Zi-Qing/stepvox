@@ -11,6 +11,7 @@ export class StepVoxView extends ItemView {
   private statusEl: HTMLElement | null = null;
   private conversationEl: HTMLElement | null = null;
   private partialEl: HTMLElement | null = null;
+  private toolStatusEl: HTMLElement | null = null;
   private perfEl: HTMLElement | null = null;
   private micBtn: HTMLButtonElement | null = null;
   private clearBtn: HTMLButtonElement | null = null;
@@ -72,6 +73,7 @@ export class StepVoxView extends ItemView {
     this.statusEl = null;
     this.conversationEl = null;
     this.partialEl = null;
+    this.toolStatusEl = null;
     this.micBtn = null;
   }
 
@@ -90,6 +92,7 @@ export class StepVoxView extends ItemView {
 
     if (state === "idle" || state === "listening") {
       this.clearPartial();
+      this.clearToolStatus();
     }
   }
 
@@ -105,9 +108,27 @@ export class StepVoxView extends ItemView {
     this.scrollToBottom();
   }
 
+  /** Ephemeral status row (e.g. "正在搜索 X")—replaced/cleared, not appended to conversation. */
+  setToolStatus(text: string): void {
+    if (!this.conversationEl) return;
+    if (!this.toolStatusEl) {
+      this.toolStatusEl = this.conversationEl.createDiv({
+        cls: "stepvox-message stepvox-tool-status",
+      });
+    }
+    this.toolStatusEl.textContent = text;
+    this.scrollToBottom();
+  }
+
+  clearToolStatus(): void {
+    this.toolStatusEl?.remove();
+    this.toolStatusEl = null;
+  }
+
   addEntry(entry: ConversationEntry): void {
     this.conversation.push(entry);
     this.clearPartial();
+    this.clearToolStatus();
     this.renderEntry(entry);
     this.scrollToBottom();
   }
@@ -145,6 +166,9 @@ export class StepVoxView extends ItemView {
   private renderConversation(): void {
     if (!this.conversationEl) return;
     this.conversationEl.empty();
+    // .empty() destroyed the DOM nodes — drop references to match.
+    this.partialEl = null;
+    this.toolStatusEl = null;
 
     if (this.conversation.length === 0) {
       this.conversationEl.createEl("p", {
@@ -183,8 +207,9 @@ export class StepVoxView extends ItemView {
 
   private updateMicBtn(): void {
     if (!this.micBtn) return;
-    // In Session Mode, button is always active (red) until user clicks to exit
-    const active = this.sessionMode || this.pipelineState === "listening";
+    // Mic is "live" iff a runtime session is alive. Driven by
+    // PipelineCallbacks.onSessionActiveChange — see main.ts.
+    const active = this.sessionMode;
     this.micBtn.toggleClass("stepvox-mic-active", active);
     setIcon(this.micBtn, active ? "mic-off" : "mic");
   }

@@ -7,6 +7,7 @@ describe("getToolLayer", () => {
     expect(getToolLayer("search")).toBe("read");
     expect(getToolLayer("list_files")).toBe("read");
     expect(getToolLayer("get_properties")).toBe("read");
+    expect(getToolLayer("find_path")).toBe("read");
   });
 
   it("classifies write tools correctly", () => {
@@ -16,6 +17,7 @@ describe("getToolLayer", () => {
     expect(getToolLayer("update_content")).toBe("write");
     expect(getToolLayer("set_property")).toBe("write");
     expect(getToolLayer("open_file")).toBe("write");
+    expect(getToolLayer("move_file")).toBe("write");
   });
 
   it("classifies system tools correctly", () => {
@@ -33,7 +35,6 @@ describe("getToolLayer", () => {
 
   it("defaults unknown tools to dangerous", () => {
     expect(getToolLayer("delete_file")).toBe("dangerous");
-    expect(getToolLayer("move_file")).toBe("dangerous");
     expect(getToolLayer("rename_file")).toBe("dangerous");
     expect(getToolLayer("anything_unknown")).toBe("dangerous");
   });
