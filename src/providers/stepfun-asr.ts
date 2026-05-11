@@ -24,10 +24,6 @@ export class StepFunASR implements ASRProvider {
     this.config = config;
   }
 
-  async validate(): Promise<boolean> {
-    return !!this.config.apiKey;
-  }
-
   async startStreaming(callbacks: ASRStreamCallbacks): Promise<ASRStreamSession> {
     const chunks: ArrayBuffer[] = [];
 

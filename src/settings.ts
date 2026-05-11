@@ -3,7 +3,6 @@ import {
   DEFAULT_TTS_MODEL,
   DEFAULT_TTS_VOICE,
   DEFAULT_SAMPLE_RATE,
-  DEFAULT_COMMAND_TIMEOUT_MS,
   STEPFUN_VOICES_ENDPOINT,
 } from "./constants";
 import { getChatEndpoint } from "./utils/endpoint";
@@ -29,18 +28,15 @@ export interface StepVoxSettings {
   };
   asr: {
     provider: string;
-    apiKey: string;
     model: string;
     language: string;
   };
   tts: {
     enabled: boolean;
     provider: string;
-    apiKey: string;
     model: string;
     voice: string;
     speed: number;
-    volume: number;
   };
   llm: {
     provider: "stepfun" | "openai" | "anthropic" | "custom";
@@ -49,7 +45,6 @@ export interface StepVoxSettings {
     apiKey: string;
     model: string;
     temperature: number;
-    systemPrompt: string;
   };
   interaction: {
     enableSessionMode: boolean;
@@ -60,12 +55,6 @@ export interface StepVoxSettings {
     sampleRate: number;
     noiseSuppression: boolean;
     echoCancellation: boolean;
-  };
-  execution: {
-    vaultName: string;
-    commandTimeout: number;
-    confirmDestructive: boolean;
-    confirmAllWrites: boolean;
   };
   search: {
     provider: "tavily" | "exa" | "none";
@@ -81,18 +70,15 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
   },
   asr: {
     provider: "stepfun",
-    apiKey: "",
     model: DEFAULT_ASR_MODEL,
     language: "zh",
   },
   tts: {
     enabled: true,
     provider: "stepfun",
-    apiKey: "",
     model: DEFAULT_TTS_MODEL,
     voice: DEFAULT_TTS_VOICE,
     speed: 1.0,
-    volume: 1.0,
   },
   llm: {
     provider: "stepfun",
@@ -101,7 +87,6 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
     apiKey: "",
     model: "step-3.5-flash",
     temperature: 0.3,
-    systemPrompt: "",
   },
   interaction: {
     enableSessionMode: false,
@@ -112,12 +97,6 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
     sampleRate: DEFAULT_SAMPLE_RATE,
     noiseSuppression: true,
     echoCancellation: true,
-  },
-  execution: {
-    vaultName: "",
-    commandTimeout: DEFAULT_COMMAND_TIMEOUT_MS,
-    confirmDestructive: true,
-    confirmAllWrites: false,
   },
   search: {
     provider: "none",

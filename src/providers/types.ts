@@ -32,8 +32,6 @@ export interface ASRStreamCallbacks {
   onPartial: (text: string) => void;
   onFinal: (text: string) => void;
   onError: (err: Error) => void;
-  onVADStart?: () => void;
-  onVADStop?: () => void;
 }
 
 export interface ASRStreamSession {
@@ -46,7 +44,6 @@ export interface ASRProvider {
   readonly id: string;
   readonly name: string;
   startStreaming(callbacks: ASRStreamCallbacks): Promise<ASRStreamSession>;
-  validate(): Promise<boolean>;
   dispose(): void;
 }
 
@@ -58,8 +55,6 @@ export interface TTSProvider {
     voice?: string;
     speed?: number;
   }): Promise<{ audioData: ArrayBuffer; format: string }>;
-  getVoices(): Promise<{ id: string; name: string }[]>;
-  validate(): Promise<boolean>;
   dispose(): void;
 }
 
@@ -67,6 +62,5 @@ export interface LLMProvider {
   readonly id: string;
   readonly name: string;
   chat(request: LLMRequest): Promise<LLMResponse>;
-  validate(): Promise<boolean>;
   dispose(): void;
 }

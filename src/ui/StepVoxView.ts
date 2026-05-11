@@ -1,16 +1,7 @@
 import { ItemView, WorkspaceLeaf, setIcon } from "obsidian";
-import { VIEW_TYPE_STEPVOX, DISPLAY_NAME } from "../constants";
+import { VIEW_TYPE_STEPVOX, DISPLAY_NAME, STATE_LABELS } from "../constants";
 import type { PipelineState, ConversationEntry } from "../types";
 import type { PerformanceMetrics } from "../utils/performance-stats";
-
-const STATE_LABELS: Record<PipelineState, string> = {
-  idle: "Ready",
-  listening: "Listening...",
-  transcribing: "Transcribing...",
-  thinking: "Thinking...",
-  executing: "Executing...",
-  speaking: "Speaking...",
-};
 
 export class StepVoxView extends ItemView {
   private pipelineState: PipelineState = "idle";

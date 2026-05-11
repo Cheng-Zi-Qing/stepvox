@@ -18,7 +18,7 @@
 
 import { OpenAIProvider } from "../src/providers/llm/openai";
 import { AnthropicProvider } from "../src/providers/llm/anthropic";
-import type { LLMProvider, ToolDefinition } from "../src/providers/llm/types";
+import type { LLMProvider, ToolDefinition } from "../src/providers/types";
 import { loadStepVoxData, type StepVoxData } from "./_lib/load-data";
 
 function buildProvider(data: StepVoxData): { provider: LLMProvider; label: string; endpoint: string } {

@@ -6,7 +6,6 @@ const STATE_LABELS: Record<PipelineState, string> = {
   listening: "🔴 Listening...",
   transcribing: "✍️ Transcribing...",
   thinking: "🧠 Thinking...",
-  executing: "⚡ Executing...",
   speaking: "🔊 Speaking...",
 };
 

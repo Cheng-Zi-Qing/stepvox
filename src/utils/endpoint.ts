@@ -1,7 +1,7 @@
 /**
  * Construct StepFun API endpoint based on region and mode
  */
-export function getStepFunEndpoint(
+function getStepFunEndpoint(
   region: "china" | "global",
   mode: "api" | "plan",
   service: string

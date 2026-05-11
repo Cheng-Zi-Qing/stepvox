@@ -1,4 +1,4 @@
-import type { LLMProvider } from "./types";
+import type { LLMProvider } from "../types";
 import { OpenAIProvider } from "./openai";
 import { AnthropicProvider } from "./anthropic";
 import { getChatEndpoint } from "../../utils/endpoint";

@@ -61,8 +61,6 @@ export class AgentOrchestrator {
     const messages = this.buildMessages();
     const tools = routeTools(userInput);
 
-    let actionsTaken: string[] = [];
-
     // ----- Round 1 -----
     const r1 = await this.callLLM(messages, tools);
     if (this.interrupted) return "";
@@ -86,17 +84,16 @@ export class AgentOrchestrator {
     const r1Results = await this.runToolPhase(r1.response!.toolCalls, callbacks);
     if (this.interrupted) return "";
     this.pushToolResults(messages, r1Results);
-    actionsTaken.push(...summarizeResults(r1Results));
 
     // ----- Round 2 -----
     const r2 = await this.callLLM(messages, tools);
     if (this.interrupted) return "";
     if (r2.error) {
-      return this.finalize(pickApology(), actionsTaken);
+      return this.finalize(pickApology());
     }
     if (r2.response!.toolCalls.length === 0) {
       const final = r2.response!.content ?? pickApology();
-      return this.finalize(final, actionsTaken);
+      return this.finalize(final);
     }
 
     if (r2.response!.content) callbacks?.onPartial?.(r2.response!.content);
@@ -109,13 +106,12 @@ export class AgentOrchestrator {
     const r2Results = await this.runToolPhase(r2.response!.toolCalls, callbacks);
     if (this.interrupted) return "";
     this.pushToolResults(messages, r2Results);
-    actionsTaken.push(...summarizeResults(r2Results));
 
     // ----- Round 3: forced summary, no tools -----
     const r3 = await this.callLLM(messages, []);
     if (this.interrupted) return "";
     const final = !r3.error && r3.response!.content ? r3.response!.content : pickApology();
-    return this.finalize(final, actionsTaken);
+    return this.finalize(final);
   }
 
   abort(): void {
@@ -140,7 +136,7 @@ export class AgentOrchestrator {
 
   // ---------- internals ----------
 
-  private finalize(finalContent: string, _actionsTaken: string[] = []): string {
+  private finalize(finalContent: string): string {
     this.history.push({ role: "assistant", content: finalContent });
     this.trimHistory();
     return finalContent;
@@ -268,15 +264,3 @@ export class AgentOrchestrator {
     }
   }
 }
-
-function summarizeResults(results: ToolResult[]): string[] {
-  return results.map((r) => (r.success ? `ok` : `fail: ${r.content}`));
-}
-
-export const _internal = {
-  APOLOGY_FALLBACKS,
-  LLM_TIMEOUT_MS,
-  TOOL_PHASE_TIMEOUT_MS,
-  WEB_SEARCH_TIMEOUT_MS,
-  MAX_ROUNDS,
-};

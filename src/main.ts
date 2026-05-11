@@ -113,7 +113,6 @@ export default class StepVoxPlugin extends Plugin {
       llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
       interaction: { ...DEFAULT_SETTINGS.interaction, ...saved.interaction },
       audio: { ...DEFAULT_SETTINGS.audio, ...saved.audio },
-      execution: { ...DEFAULT_SETTINGS.execution, ...saved.execution },
       search: { ...DEFAULT_SETTINGS.search, ...saved.search },
     };
   }

@@ -8,13 +8,6 @@ interface StepFunTTSConfig {
   speed: number;
 }
 
-const VOICES = [
-  { id: "cixingnansheng", name: "磁性男声" },
-  { id: "tianmeinnvsheng", name: "甜美女声" },
-  { id: "boynansheng", name: "播音男声" },
-  { id: "boyinvsheng", name: "播音女声" },
-];
-
 export class StepFunTTS implements TTSProvider {
   readonly id = "stepfun-tts";
   readonly name = "StepFun TTS";
@@ -56,19 +49,6 @@ export class StepFunTTS implements TTSProvider {
 
     const audioData = await response.arrayBuffer();
     return { audioData, format: "mp3" };
-  }
-
-  async getVoices(): Promise<{ id: string; name: string }[]> {
-    return VOICES;
-  }
-
-  async validate(): Promise<boolean> {
-    try {
-      await this.synthesize({ text: "test" });
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   dispose(): void {}

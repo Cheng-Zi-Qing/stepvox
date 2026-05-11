@@ -14,8 +14,8 @@ import { join } from "node:path";
 
 export interface StepVoxData {
   stepfun: { region: "china" | "global"; mode: "api" | "plan"; apiKey: string };
-  asr: { provider: string; apiKey: string; model: string; language: string };
-  tts: { enabled: boolean; provider: string; apiKey: string; model: string; voice: string; speed: number; volume: number };
+  asr: { provider: string; apiKey?: string; model: string; language: string };
+  tts: { enabled: boolean; provider: string; apiKey?: string; model: string; voice: string; speed: number; volume?: number };
   llm: {
     provider: "stepfun" | "openai" | "anthropic" | "custom";
     stepfunMode: "api" | "plan";
@@ -23,9 +23,11 @@ export interface StepVoxData {
     apiKey: string;
     model: string;
     temperature: number;
+    [REDACTED]?: string;
     format?: string;
   };
   audio: { sampleRate: number; noiseSuppression: boolean; echoCancellation: boolean };
+  execution?: { vaultName?: string; commandTimeout?: number; confirmDestructive?: boolean; confirmAllWrites?: boolean };
   search?: { provider: string; apiKey: string };
 }
 

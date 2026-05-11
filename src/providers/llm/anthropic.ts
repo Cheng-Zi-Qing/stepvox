@@ -4,7 +4,7 @@ import type {
   LLMResponse,
   ToolDefinition,
   ToolCall,
-} from "./types";
+} from "../types";
 
 interface AnthropicConfig {
   endpoint: string;
@@ -89,17 +89,6 @@ export class AnthropicProvider implements LLMProvider {
       content: textContent,
       toolCalls,
     };
-  }
-
-  async validate(): Promise<boolean> {
-    try {
-      await this.chat({
-        messages: [{ role: "user", content: "hi" }],
-      });
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   dispose(): void {}
