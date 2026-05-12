@@ -173,8 +173,14 @@ export class VoicePipeline {
   private bargeInPromptText = "刚刚被打断了，您还有什么需要？";
   private suppressNextEcho = false;     // Vad1 onIdleTimeout in a fresh listen → suppress mic restart
 
-  // TTS chain — segments are awaited end-to-end so speaking state is honest.
+  // TTS pipeline. Two parallel chains so playback never has to wait for
+  // synthesis: while chunk N is playing through the speaker, chunk N+1's
+  // synthesise call is already in flight. ttsChain is the public-facing
+  // "everything has finished playing" promise; ttsSynthChain serialises
+  // synthesis requests so we don't fan a long answer out as N concurrent
+  // POSTs to the TTS endpoint (the provider would rate-limit).
   private ttsChain: Promise<void> = Promise.resolve();
+  private ttsSynthChain: Promise<void> = Promise.resolve();
   private ttsAborted = false;
 
   private perfTracker = new PerformanceTracker();
@@ -292,6 +298,7 @@ export class VoicePipeline {
     // endSession just because its LLM call got aborted.
     this.ttsAborted = false;
     this.ttsChain = Promise.resolve();
+    this.ttsSynthChain = Promise.resolve();
 
     if (!this.asr) {
       this.callbacks.onError("ASR not configured");
@@ -510,6 +517,7 @@ export class VoicePipeline {
     this.ttsAborted = true;
     this.player.stop();
     this.ttsChain = Promise.resolve();
+    this.ttsSynthChain = Promise.resolve();
     this.clearAsrFinalTimer();
     this.asrSession?.close();
     this.asrSession = null;
@@ -578,6 +586,7 @@ export class VoicePipeline {
     this.recorder.stop();
     this.player.stop();
     this.ttsChain = Promise.resolve();
+    this.ttsSynthChain = Promise.resolve();
     this.ttsAborted = true;
     this.clearAsrFinalTimer();
     this.asrSession?.close();
@@ -648,14 +657,23 @@ export class VoicePipeline {
 
     // TTS providers have a practical length ceiling (step voice ≈ 120 chars
     // before 10s synth timeout). Split the text into short chunks on
-    // sentence boundaries so each synth call stays fast; the ttsChain
-    // already plays them back-to-back without a gap.
+    // sentence boundaries. Synthesis and playback run as two separate
+    // chains so chunk N+1's synth starts while chunk N is still playing —
+    // the gap between chunks shrinks from "synth latency" to "≈0". synth
+    // is still serialised (not fanned out concurrently) so we don't
+    // hammer the provider with N parallel POSTs.
     const chunks = chunkForTTS(cleanText, TTS_MAX_CHUNK_CHARS);
     debugLog("TTS", `enqueue length=${cleanText.length} chunks=${chunks.length}: "${cleanText.slice(0, 60)}"`);
 
     for (const chunk of chunks) {
-      this.ttsChain = this.ttsChain.then(async () => {
-        if (this.ttsAborted) return;
+      // 1) Schedule synthesis right now, in series with previous synths.
+      //    synthPromise resolves with the audio bytes (or null on
+      //    abort/error). Captured here so the play step below can await it.
+      const synthPromise: Promise<ArrayBuffer | null> = (async () => {
+        // Wait for any prior synth to finish so we run at most one synth
+        // request in flight at a time (concurrency = 1 against provider).
+        await this.ttsSynthChain.catch(() => {});
+        if (this.ttsAborted) return null;
         try {
           debugLog("TTS", `synth start length=${chunk.length}`);
           const { audioData } = await withTimeout(
@@ -663,12 +681,29 @@ export class VoicePipeline {
             TTS_SYNTH_TIMEOUT_MS,
             `TTS synth timed out after ${TTS_SYNTH_TIMEOUT_MS / 1000}s`
           );
-          if (this.ttsAborted) return;
-          debugLog("TTS", `play start bytes=${audioData.byteLength}`);
+          return audioData;
+        } catch (err) {
+          debugLog("TTS", `synth error: ${err instanceof Error ? err.message : err}`);
+          return null;
+        }
+      })();
+      // Advance the synth chain so the NEXT chunk's synth waits for THIS
+      // chunk's synth (not for its playback).
+      this.ttsSynthChain = synthPromise.then(() => undefined, () => undefined);
+
+      // 2) Schedule playback after the previous chunk finishes playing
+      //    AND this chunk's audio is ready. Concurrency-2 effect: while
+      //    chunk N plays, chunk N+1 has already been synthesised in
+      //    parallel and is sitting waiting on playChain.
+      this.ttsChain = this.ttsChain.then(async () => {
+        const audioData = await synthPromise;
+        if (this.ttsAborted || !audioData) return;
+        debugLog("TTS", `play start bytes=${audioData.byteLength}`);
+        try {
           await this.player.play(audioData);
           debugLog("TTS", `play end`);
         } catch (err) {
-          debugLog("TTS", `error: ${err instanceof Error ? err.message : err}`);
+          debugLog("TTS", `play error: ${err instanceof Error ? err.message : err}`);
         }
       });
     }
