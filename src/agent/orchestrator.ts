@@ -14,6 +14,12 @@ const SLOW_TOOL_THRESHOLD_MS = 3_000;
 const MEMORY_HINT_INTERVAL = 10;
 const MAX_HISTORY_MESSAGES = 20;
 
+// When R1 used a bulk-data tool (web_search / search) and R2 returned
+// content longer than this, force the R3 summary round instead of
+// finalising R2 as-is. Mirrors the "max 80 Chinese chars" spoken-output
+// ceiling already enforced in the system prompt.
+const LONG_ANSWER_CHAR_LIMIT = 80;
+
 // Pre-generated apology lines for when Round 3 LLM itself fails.
 // Random selection keeps the failure path zero-dependency (no extra LLM call).
 const APOLOGY_FALLBACKS = [
@@ -99,42 +105,62 @@ export class AgentOrchestrator {
     if (r2.error) {
       return this.finalize(pickApology());
     }
-    if (r2.response!.toolCalls.length === 0) {
-      const final = r2.response!.content ?? pickApology();
-      return this.finalize(final);
-    }
 
-    if (r2.response!.content) callbacks?.onPartial?.(r2.response!.content);
-    messages.push({
-      role: "assistant",
-      content: r2.response!.content,
-      tool_calls: r2.response!.toolCalls,
-    });
-
-    // Partition R2's tool calls into "new" (actually novel) and "duplicate"
-    // (same tool + same args as R1). Duplicates are short-circuited with a
-    // reminder — we do NOT re-execute, which would just waste time and
-    // pile identical output into the context window.
-    const { novelCalls, duplicateCalls } = partitionCalls(r2.response!.toolCalls, r1Signatures);
     let duplicateLoopDetected = false;
-    if (duplicateCalls.length > 0) {
-      duplicateLoopDetected = duplicateCalls.length === r2.response!.toolCalls.length;
-      for (const dup of duplicateCalls) {
-        debugLog("LOOP", `R2 duplicate tool ${dup.name} ${JSON.stringify(dup.args ?? {})} — short-circuiting`);
-        messages.push({
-          role: "tool",
-          content:
-            "This tool has already been called with the same arguments in this turn. The previous result is in the conversation above — use it instead of asking again.",
-          tool_call_id: dup.id,
-        });
-      }
-    }
 
-    const r2Results = novelCalls.length > 0
-      ? await this.runToolPhase(novelCalls, callbacks)
-      : [];
-    if (this.interrupted) return "";
-    this.pushToolResults(messages, r2Results);
+    if (r2.response!.toolCalls.length === 0) {
+      // R2 produced its final answer without further tool calls. Fast path
+      // is to return it directly. Exception: if R1 fetched bulk data from
+      // an external/unbounded source (web_search, full-text search) AND
+      // R2's answer blew past the spoken-output ceiling, the model is
+      // reciting the raw payload instead of summarising. Force the R3
+      // summary round — it has tools=[] and a hard "max 80 chars"
+      // instruction. Costs one extra LLM round only on this specific path.
+      const r2Content = r2.response!.content ?? "";
+      const usedBulkTool = r1.response!.toolCalls.some(
+        (c) => c.name === "web_search" || c.name === "search"
+      );
+      const overSpokenLimit = r2Content.length > LONG_ANSWER_CHAR_LIMIT;
+      if (!(usedBulkTool && overSpokenLimit)) {
+        return this.finalize(r2Content || pickApology());
+      }
+      debugLog(
+        "LOOP",
+        `R2 over-long answer (${r2Content.length} chars) after bulk tool — forcing R3 summary`
+      );
+      messages.push({ role: "assistant", content: r2Content });
+    } else {
+      if (r2.response!.content) callbacks?.onPartial?.(r2.response!.content);
+      messages.push({
+        role: "assistant",
+        content: r2.response!.content,
+        tool_calls: r2.response!.toolCalls,
+      });
+
+      // Partition R2's tool calls into "new" (actually novel) and "duplicate"
+      // (same tool + same args as R1). Duplicates are short-circuited with a
+      // reminder — we do NOT re-execute, which would just waste time and
+      // pile identical output into the context window.
+      const { novelCalls, duplicateCalls } = partitionCalls(r2.response!.toolCalls, r1Signatures);
+      if (duplicateCalls.length > 0) {
+        duplicateLoopDetected = duplicateCalls.length === r2.response!.toolCalls.length;
+        for (const dup of duplicateCalls) {
+          debugLog("LOOP", `R2 duplicate tool ${dup.name} ${JSON.stringify(dup.args ?? {})} — short-circuiting`);
+          messages.push({
+            role: "tool",
+            content:
+              "This tool has already been called with the same arguments in this turn. The previous result is in the conversation above — use it instead of asking again.",
+            tool_call_id: dup.id,
+          });
+        }
+      }
+
+      const r2Results = novelCalls.length > 0
+        ? await this.runToolPhase(novelCalls, callbacks)
+        : [];
+      if (this.interrupted) return "";
+      this.pushToolResults(messages, r2Results);
+    }
 
     // ----- Round 3: forced summary, no tools -----
     // Some providers (observed on step-3.5-flash) still emit <tool_call>

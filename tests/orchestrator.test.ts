@@ -211,4 +211,69 @@ describe("AgentOrchestrator — D46 3-round loop", () => {
     // At most R1 got called; R2 should not have been dispatched
     expect(llmCalls.length).toBeLessThanOrEqual(1);
   });
+
+  // Problem-1 fix: when R1 calls a bulk tool (web_search/search) and R2
+  // returns a long final answer instead of summarising, force the R3
+  // summary round so the user gets a spoken-friendly reply.
+  describe("forced R3 summary after bulk tool + over-long R2", () => {
+    const longAnswer = "今年上半年上市的中国大模型公司主要有两家：智谱华章于一月八日在港交所挂牌，被称为全球大模型第一股，源自清华大学技术孵化。另一家是月之暗面，三月在美股完成上市。两家公司都拥有自研模型并在企业市场快速扩张。";
+
+    it("R1 web_search → R2 long answer (no tool calls) → forces R3 summary", async () => {
+      const { provider, calls } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "web_search", args: { query: "2026 IPO" } }] },
+        { content: longAnswer, toolCalls: [] },
+        { content: "今年上半年中国共两家大模型公司上市：智谱华章、月之暗面。", toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+
+      const orch = make(provider, executor);
+      const result = await orch.run("今年上半年上市的中国大模型公司");
+
+      expect(calls.length).toBe(3); // R1, R2, R3 all dispatched
+      expect(calls[2].tools).toEqual([]); // R3 forces tools=[]
+      expect(result.length).toBeLessThan(longAnswer.length); // shorter than R2
+      expect(result).toContain("智谱"); // R3 actually summarised
+    });
+
+    it("R1 search (vault) → R2 long answer → also forces R3", async () => {
+      const { provider, calls } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "search", args: { query: "notes" } }] },
+        { content: longAnswer, toolCalls: [] },
+        { content: "概要回答。", toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("查我的笔记");
+
+      expect(calls.length).toBe(3);
+      expect(result).toBe("概要回答。");
+    });
+
+    it("R1 read_file (non-bulk) → R2 long answer → does NOT force R3 (fast path)", async () => {
+      const { provider, calls } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "read_file", args: { path: "x" } }] },
+        { content: longAnswer, toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("读一下x");
+
+      expect(calls.length).toBe(2); // R3 NOT dispatched
+      expect(result).toBe(longAnswer); // R2 returned as-is
+    });
+
+    it("R1 web_search → R2 short answer → does NOT force R3 (under threshold)", async () => {
+      const short = "找到两家：智谱、月暗。"; // < 80 chars
+      const { provider, calls } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "web_search", args: { query: "x" } }] },
+        { content: short, toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("今年上半年");
+
+      expect(calls.length).toBe(2);
+      expect(result).toBe(short);
+    });
+  });
 });
