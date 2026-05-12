@@ -5,7 +5,7 @@ import {
   DEFAULT_SAMPLE_RATE,
   STEPFUN_VOICES_ENDPOINT,
 } from "./constants";
-import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting, TextComponent } from "obsidian";
 import type StepVoxPlugin from "./main";
 import { LLM_PROVIDERS, getLLMProviderEntry } from "./providers/llm/registry";
 import type { ConfigField } from "./providers/llm/registry";
@@ -257,18 +257,33 @@ export class StepVoxSettingTab extends PluginSettingTab {
 
     // StepFun Global
     new Setting(containerEl).setName("StepFun 配置").setHeading();
+    let stepfunKeyText: TextComponent;
     new Setting(containerEl)
       .setName("API Key")
       .setDesc("StepFun API Key (用于 ASR、TTS 和 LLM)")
-      .addText((text) =>
+      .addText((text) => {
+        stepfunKeyText = text;
         text
           .setPlaceholder("Enter API key")
           .setValue(this.plugin.settings.stepfun.apiKey)
           .onChange(async (value) => {
             this.plugin.settings.stepfun.apiKey = value;
             await this.plugin.saveSettings();
-          })
-      );
+          });
+        text.inputEl.type = "password";
+      })
+      .addExtraButton((btn) => {
+        let shown = false;
+        btn
+          .setIcon("eye")
+          .setTooltip("Show API key / 显示")
+          .onClick(() => {
+            shown = !shown;
+            stepfunKeyText.inputEl.type = shown ? "text" : "password";
+            btn.setIcon(shown ? "eye-off" : "eye");
+            btn.setTooltip(shown ? "Hide API key / 隐藏" : "Show API key / 显示");
+          });
+      });
     new Setting(containerEl)
       .setName("地区")
       .setDesc("选择服务地区")
@@ -417,17 +432,32 @@ export class StepVoxSettingTab extends PluginSettingTab {
           })
       );
     if (this.plugin.settings.search.provider !== "none") {
+      let searchKeyText: TextComponent;
       new Setting(containerEl)
         .setName("API Key")
-        .addText((text) =>
+        .addText((text) => {
+          searchKeyText = text;
           text
             .setPlaceholder("Enter API key")
             .setValue(this.plugin.settings.search.apiKey)
             .onChange(async (value) => {
               this.plugin.settings.search.apiKey = value;
               await this.plugin.saveSettings();
-            })
-        )
+            });
+          text.inputEl.type = "password";
+        })
+        .addExtraButton((btn) => {
+          let shown = false;
+          btn
+            .setIcon("eye")
+            .setTooltip("Show API key / 显示")
+            .onClick(() => {
+              shown = !shown;
+              searchKeyText.inputEl.type = shown ? "text" : "password";
+              btn.setIcon(shown ? "eye-off" : "eye");
+              btn.setTooltip(shown ? "Hide API key / 隐藏" : "Show API key / 显示");
+            });
+        })
         .addButton((button) =>
           button
             .setButtonText("Test")
