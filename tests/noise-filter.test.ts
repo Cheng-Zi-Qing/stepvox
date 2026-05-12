@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isNoiseLike } from "../src/pipeline/VoicePipeline";
+import { isNoiseLike } from "../src/pipeline/PhaseController";
 
 describe("isNoiseLike — filler/noise ASR filter", () => {
   it("treats single Chinese filler chars as noise", () => {

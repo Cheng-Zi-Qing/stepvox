@@ -18,6 +18,8 @@ import { PerformanceTracker } from "../utils/performance-stats";
 import type { PerformanceMetrics } from "../utils/performance-stats";
 import { debugLog, initDebugLogger } from "../utils/debug-logger";
 import { withTimeout } from "../utils/timeout";
+import { PhaseController, cleanForDisplay } from "./PhaseController";
+import type { PhaseDelegate, Phase } from "./PhaseDelegate";
 
 // D48: ASR/TTS hard timeouts. LLM/tool timeouts live in orchestrator.
 const ASR_CONNECT_TIMEOUT_MS = 5_000;
@@ -31,42 +33,6 @@ const TTS_MAX_CHUNK_CHARS = 120;
 // If Vad1's onIdleTimeout fires (no speech detected) the pipeline treats it
 // as a false barge-in and asks the user what they wanted.
 const BARGE_IN_GRACE_MS = 3_000;
-
-const SESSION_EXIT_KEYWORDS = ["退出", "结束", "停止", "退下", "exit", "stop", "quit"];
-
-/**
- * Short filler/noise tokens that ASR returns when the user clears their
- * throat, breathes, or VAD2 fires on background noise. Treating these as
- * real user turns wastes an LLM round and produces an unhelpful "嗯，我
- *在呢" reply that occupies the mic while the user is trying to ask the
- * real question. We silently drop them and re-arm listening instead.
- *
- * Match rule (in isNoiseLike): trimmed text is 1-2 chars AND those chars
- * are all in this set (optionally followed by terminal punctuation).
- */
-const FILLER_TOKENS = new Set([
-  "嗯", "啊", "呃", "诶", "哦", "唔", "呀", "哎", "哈", "喔",
-  "嗯嗯", "啊啊", "哦哦", "嗯哼",
-  "um", "uh", "er", "ah", "oh",
-]);
-const TERMINAL_PUNCT = /[。.,?!？！，、]$/;
-
-export function isNoiseLike(text: string): boolean {
-  const stripped = text.replace(TERMINAL_PUNCT, "").trim();
-  if (stripped.length === 0 || stripped.length > 2) return false;
-  return FILLER_TOKENS.has(stripped) || FILLER_TOKENS.has(stripped.toLowerCase());
-}
-
-// After this many consecutive noise-like ASR results in session mode,
-// end the session. Prevents the mic from staying hot forever when the
-// user has walked away and the room has ambient noise that VAD2 keeps
-// firing on. Resets to 0 the moment a real (non-noise) transcript
-// arrives or the user actively cancels/restarts.
-const MAX_CONSECUTIVE_NOISE = 3;
-
-// Fallback phrase when the LLM produces no usable text (e.g. emits a
-// tool_call XML payload at R3 instead of a natural-language summary).
-const FALLBACK_APOLOGY = "抱歉，刚才没能整理好结果。你能再说一遍或换种说法吗？";
 
 // After a TTS turn ends in Session Mode, give the speaker output and any
 // room echo time to die down before re-arming the microphone.
@@ -101,15 +67,6 @@ export interface PipelineCallbacks {
   onPerformanceMetrics?: (metrics: PerformanceMetrics) => void;
   /** Fires whenever the runtime session lifecycle changes — UI binds mic colour to this. */
   onSessionActiveChange?: (active: boolean) => void;
-}
-
-/** Strip tool-call XML / internal markers before showing assistant text in the UI. */
-function cleanForDisplay(text: string): string {
-  return text
-    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
-    .replace(/<function=[\s\S]*?<\/function>/g, "")
-    .replace(/<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>/g, "")
-    .trim();
 }
 
 /**
@@ -152,25 +109,12 @@ function chunkForTTS(text: string, maxChars: number): string[] {
   return chunks;
 }
 
-type Phase = "idle" | "listening" | "transcribing" | "thinking" | "speaking";
-
 /**
- * VoicePipeline — linear, one-step-at-a-time orchestration of a voice turn.
+ * VoicePipeline — owns all hardware I/O and provider lifecycle.
  *
- *   beginListeningPhase()         start ASR + Vad1; user is allowed to talk
- *   onUserSpoke()                 Vad1 says "done" → commit ASR, await transcript
- *   onTranscript(text)            ASR returned text → enter thinking
- *   runReasoning(text)            orchestrator runs (D46 3-round loop)
- *   speakReply(text)              TTS plays response
- *   onTurnComplete()              → if session active, back to beginListeningPhase
- *
- *   onBargeIn()                   Vad2 says "user interrupted" while thinking/speaking
- *                                 → cancel work, jump back into a fresh listening phase
- *                                 → if user doesn't follow up within BARGE_IN_GRACE_MS,
- *                                   speakReply("刚刚被打断了，您还有什么需要？")
- *
- *   endSession(reason)            single sink for any session termination;
- *                                 emits onSessionActiveChange(false) so mic resets
+ * Phase decision logic (state machine, barge-in, noise filter, exit keywords)
+ * is delegated to PhaseController via the PhaseDelegate interface. This makes
+ * the core state machine testable without Obsidian, audio, or network.
  */
 export class VoicePipeline {
   private app: App;
@@ -191,18 +135,11 @@ export class VoicePipeline {
   private toolExecutor: ToolExecutor;
   private providerDirty = true;
 
-  // Per-turn / per-session state
-  private phase: Phase = "idle";
-  private sessionAlive = false;
-  private sessionMode = false;          // sticky flag: should we auto-loop after each turn?
+  // Per-turn / per-session state (NOT phase-related — those live in controller)
   private currentVaultSnapshot = "";    // captured once at session start, reused across turns
   private asrSession: ASRStreamSession | null = null;
   private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
-  private bargeInPending = false;       // set true between onBargeIn() and the next ASR result
-  private consecutiveNoise = 0;         // streak of noise-like ASR results; reset on real input
   private spokenToolStatus = new Set<string>(); // per-turn de-dup so the user doesn't hear the same status twice
-  private bargeInPromptText = "刚刚被打断了，您还有什么需要？";
-  private suppressNextEcho = false;     // Vad1 onIdleTimeout in a fresh listen → suppress mic restart
 
   // TTS pipeline. Two parallel chains so playback never has to wait for
   // synthesis: while chunk N is playing through the speaker, chunk N+1's
@@ -215,8 +152,9 @@ export class VoicePipeline {
   private ttsAborted = false;
 
   private perfTracker = new PerformanceTracker();
-  private lastAsrDuration = 0;
-  private lastLlmDuration = 0;
+
+  // Phase controller — pure state machine
+  private controller: PhaseController;
 
   constructor(app: App, settings: StepVoxSettings, callbacks: PipelineCallbacks) {
     this.app = app;
@@ -235,12 +173,12 @@ export class VoicePipeline {
     this.toolExecutor = new ToolExecutor(app, ".obsidian/plugins/stepvox/memory");
 
     this.vad1 = new Vad1(DEFAULT_VAD1_CONFIG, {
-      onSpeechEnded: () => this.onUserSpoke(),
-      onIdleTimeout: () => this.onVad1IdleTimeout(),
+      onSpeechEnded: () => this.controller.onUserSpoke(),
+      onIdleTimeout: () => void this.controller.onVad1IdleTimeout(),
     });
 
     this.vad2 = new Vad2(DEFAULT_VAD2_CONFIG, {
-      onInterrupt: () => this.onBargeIn(),
+      onInterrupt: () => this.controller.onBargeIn(),
     });
 
     // Recorder fans audio out to ASR + both VADs. Each ignores chunks while
@@ -255,6 +193,10 @@ export class VoicePipeline {
     // speakReply() owns the speaking → listening/idle transition once the
     // full ttsChain drains.
     this.player.on("end", () => {});
+
+    // Build the delegate that bridges controller → pipeline I/O
+    const delegate = this.buildDelegate();
+    this.controller = new PhaseController(delegate);
   }
 
   // ============================================================
@@ -264,9 +206,6 @@ export class VoicePipeline {
   /** Begin a session. sessionMode=true means auto-loop after each turn. */
   async startSession(sessionMode: boolean): Promise<void> {
     debugLog("SESSION", `startSession sessionMode=${sessionMode}`);
-    this.sessionMode = sessionMode;
-    this.consecutiveNoise = 0;
-    this.setSessionAlive(true);
     this.rebuildProvidersIfNeeded();
 
     // Capture the vault's two-level folder snapshot ONCE per session, so the
@@ -284,15 +223,14 @@ export class VoicePipeline {
       this.vad2.stop();
     }
 
-    await this.beginListeningPhase();
+    await this.controller.start(sessionMode);
   }
 
   /** Hard cancel — user wants out NOW. Drops everything, returns to idle. */
   cancel(): void {
-    debugLog("SESSION", `cancel from phase=${this.phase}`);
-    this.tearDownAudio();
+    debugLog("SESSION", `cancel`);
     this.orchestrator?.abort();
-    this.endSession("user-cancel");
+    this.controller.cancel();
   }
 
   onSettingsChanged(settings: StepVoxSettings): void {
@@ -315,148 +253,148 @@ export class VoicePipeline {
   }
 
   // ============================================================
-  // ORCHESTRATION — the linear flow, one function per step.
+  // PhaseDelegate BUILDER — maps each delegate method to pipeline I/O
   // ============================================================
 
-  /** [2] Open an ASR session, start Vad1. Vad2 idles. */
-  private async beginListeningPhase(): Promise<void> {
-    if (!this.sessionAlive) return;
+  private buildDelegate(): PhaseDelegate {
+    return {
+      emitPhaseChange: (phase: Phase) => {
+        this.callbacks.onStateChange(phase as PipelineState);
+      },
+      emitSessionActive: (active: boolean) => {
+        this.callbacks.onSessionActiveChange?.(active);
+      },
+      emitResponse: (text: string) => {
+        this.callbacks.onResponse(text);
+      },
+      emitFinalTranscript: (text: string) => {
+        this.callbacks.onFinalTranscript(text);
+      },
+      emitError: (msg: string) => {
+        this.callbacks.onError(msg);
+      },
 
-    // Note: don't clear bargeInPending here. onBargeIn() sets it to true
-    // immediately before calling us, and it must survive until either
-    // onTranscript() consumes a real transcript or onVad1IdleTimeout() fires
-    // the false-barge-in prompt. The still-resolving runReasoning() of the
-    // interrupted previous turn also reads this flag to know it shouldn't
-    // endSession just because its LLM call got aborted.
+      armListening: async () => {
+        await this.armListening();
+      },
+      commitUtterance: () => {
+        this.commitUtterance();
+      },
+      disarmListening: () => {
+        this.disarmListening();
+      },
+
+      reason: async (text: string) => {
+        return await this.runReasoning(text);
+      },
+      speak: async (text: string) => {
+        await this.speakReply(text);
+      },
+
+      abortCurrentWork: () => {
+        this.abortCurrentWork();
+      },
+      armBargeInDetection: (mode: "watch" | "watch-speaking") => {
+        this.vad2.setMode(mode);
+        this.vad2.rearm();
+      },
+      disarmBargeInDetection: () => {
+        this.vad2.setMode("off");
+      },
+
+      tearDown: (reason: string) => {
+        this.tearDownAudio();
+      },
+
+      startASRPerf: () => {
+        this.perfTracker.startASR();
+      },
+      endASRPerf: () => {
+        return this.perfTracker.endASR();
+      },
+      startLLMPerf: () => {
+        this.perfTracker.startLLM();
+      },
+      endLLMPerf: () => {
+        return this.perfTracker.endLLM();
+      },
+      emitPerformanceMetrics: (asrDuration: number, llmDuration: number) => {
+        const ttsLatency = this.perfTracker.getTTSFirstTokenLatency();
+        const metrics = this.perfTracker.getMetrics(asrDuration, llmDuration, ttsLatency);
+        this.callbacks.onPerformanceMetrics?.(metrics);
+        this.perfTracker.reset();
+      },
+
+      waitForEchoCooldown: async () => {
+        await new Promise((r) => setTimeout(r, SESSION_ECHO_COOLDOWN_MS));
+      },
+    };
+  }
+
+  // ============================================================
+  // DELEGATE IMPLEMENTATIONS — the actual I/O work
+  // ============================================================
+
+  /** Open an ASR session, start Vad1, begin recording. */
+  private async armListening(): Promise<void> {
     this.ttsAborted = false;
     this.ttsChain = Promise.resolve();
     this.ttsSynthChain = Promise.resolve();
 
     if (!this.asr) {
-      this.callbacks.onError("ASR not configured");
-      this.endSession("error");
-      return;
+      throw new Error("ASR not configured");
     }
 
-    this.setPhase("listening");
     this.vad2.setMode("off"); // user is allowed to talk; that's Vad1's job
     this.vad2.rearm();
 
-    try {
-      debugLog("ASR", "creating session");
-      const session = await withTimeout(
-        this.asr.startStreaming({
-          onPartial: (text) => this.callbacks.onPartialTranscript(text),
-          onFinal: (text) => {
-            debugLog("ASR", `final length=${text.length}`);
-            this.clearAsrFinalTimer();
-            void this.onTranscript(text);
-          },
-          onError: (err) => {
-            this.clearAsrFinalTimer();
-            this.handleAsrError(err.message);
-          },
-        }),
-        ASR_CONNECT_TIMEOUT_MS,
-        `ASR connect timed out after ${ASR_CONNECT_TIMEOUT_MS / 1000}s`
-      );
-      this.asrSession = session;
-      await this.recorder.start();
-      this.vad1.start();
-      this.perfTracker.startASR();
-    } catch (err) {
-      this.handleAsrError(err instanceof Error ? err.message : "Failed to start listening");
-    }
+    debugLog("ASR", "creating session");
+    const session = await withTimeout(
+      this.asr.startStreaming({
+        onPartial: (text) => this.callbacks.onPartialTranscript(text),
+        onFinal: (text) => {
+          debugLog("ASR", `final length=${text.length}`);
+          this.clearAsrFinalTimer();
+          void this.controller.onTranscript(text);
+        },
+        onError: (err) => {
+          this.clearAsrFinalTimer();
+          this.callbacks.onError(err.message);
+          this.controller.cancel();
+        },
+      }),
+      ASR_CONNECT_TIMEOUT_MS,
+      `ASR connect timed out after ${ASR_CONNECT_TIMEOUT_MS / 1000}s`
+    );
+    this.asrSession = session;
+    await this.recorder.start();
+    this.vad1.start();
   }
 
-  /** [3] Vad1 says the user is done. Commit the ASR session and wait. */
-  private onUserSpoke(): void {
-    if (this.phase !== "listening" || !this.asrSession) return;
-    debugLog("VAD1", "speechEnded → commit ASR");
+  /** Stop Vad1, commit ASR, arm final timer. */
+  private commitUtterance(): void {
+    if (!this.asrSession) return;
     this.vad1.stop();
     this.asrSession.commit();
     this.armAsrFinalTimer();
-    this.setPhase("transcribing");
   }
 
-  /** [4] ASR returned. Filter, then enter thinking. */
-  private async onTranscript(text: string): Promise<void> {
-    const trimmed = text.trim();
-
-    // After a Vad2 barge-in we waited BARGE_IN_GRACE_MS for the user to talk.
-    // If they didn't (Vad1.onIdleTimeout fired) we already triggered the
-    // "刚刚被打断了" prompt — drop any tardy ASR result here.
-    if (this.bargeInPending && !trimmed) {
-      debugLog("BARGE-IN", "empty transcript after grace, ignoring");
-      return;
-    }
-    this.bargeInPending = false;
-
-    if (!trimmed) {
-      // No speech detected — restart listening (Session Mode) or just idle.
-      if (this.sessionMode && this.sessionAlive) {
-        await this.beginListeningPhase();
-      } else {
-        this.endSession("idle-timeout");
-      }
-      return;
-    }
-
-    // Filler-only utterances ("嗯", "啊", "uh") usually mean ASR caught
-    // background noise / throat-clearing, NOT a real user turn. Treat
-    // them like an empty transcript: silently re-arm listening in
-    // session mode rather than wasting an LLM round and occupying the
-    // mic with an "嗯, 我在呢" reply that talks over the user's real
-    // next question. Track a streak so we don't loop forever — if the
-    // user has clearly walked away (or background noise is persistent)
-    // end the session after MAX_CONSECUTIVE_NOISE in a row.
-    if (isNoiseLike(trimmed)) {
-      this.consecutiveNoise += 1;
-      debugLog(
-        "ASR",
-        `noise-like input "${trimmed}" (streak ${this.consecutiveNoise}/${MAX_CONSECUTIVE_NOISE})`
-      );
-      if (this.consecutiveNoise >= MAX_CONSECUTIVE_NOISE) {
-        debugLog("SESSION", `noise streak ${this.consecutiveNoise} — ending session`);
-        this.endSession("noise-timeout");
-        return;
-      }
-      if (this.sessionMode && this.sessionAlive) {
-        await this.beginListeningPhase();
-      } else {
-        this.endSession("idle-timeout");
-      }
-      return;
-    }
-    // Real transcript — reset the streak.
-    this.consecutiveNoise = 0;
-
-    this.callbacks.onFinalTranscript(trimmed);
-
-    // Explicit exit keywords end the session immediately, no LLM round trip.
-    if (this.sessionMode && SESSION_EXIT_KEYWORDS.some((kw) => trimmed.includes(kw))) {
-      debugLog("EXIT", `exit keyword in "${trimmed}"`);
-      this.endSession("exit-keyword");
-      return;
-    }
-
-    this.lastAsrDuration = this.perfTracker.endASR();
-    await this.runReasoning(trimmed);
+  /** Stop listening hardware. */
+  private disarmListening(): void {
+    this.vad1.stop();
+    this.clearAsrFinalTimer();
+    this.asrSession?.close();
+    this.asrSession = null;
   }
 
-  /** [5] Run the agent loop (Vad2 watches for barge-in). */
-  private async runReasoning(text: string): Promise<void> {
+  /** Run the agent orchestrator loop. Returns the raw response text. */
+  private async runReasoning(text: string): Promise<string> {
     if (!this.orchestrator) {
       this.callbacks.onError("LLM not configured");
-      this.endSession("error");
-      return;
+      return "";
     }
 
-    this.setPhase("thinking");
     this.spokenToolStatus.clear();
-    this.vad2.setMode("watch");
-    this.vad2.rearm();
-    this.perfTracker.startLLM();
 
     let response: string;
     try {
@@ -500,80 +438,23 @@ export class VoicePipeline {
       debugLog("LLM", `error: ${err instanceof Error ? err.message : err}`);
       response = "";
     }
-    this.lastLlmDuration = this.perfTracker.endLLM();
 
-    if (!this.sessionAlive) return; // cancelled mid-thinking
-    if (this.bargeInPending) return; // onBargeIn already started a fresh listening phase
-
-    // If the model produced no usable response, surface a graceful fallback
-    // instead of silence. Common case: step-3.5-flash returns a tool_call
-    // XML payload at R3 even when tools=[]; cleanForDisplay strips it to
-    // an empty string. Apology keeps the conversation moving.
-    const cleaned = cleanForDisplay(response);
-    const usableResponse = cleaned || (response ? FALLBACK_APOLOGY : "");
-    if (!usableResponse) {
-      debugLog("LLM", "empty response, ending session");
-      this.endSession("empty-response");
-      return;
-    }
-    if (cleaned !== usableResponse) {
-      debugLog("LLM", `response was unusable XML (${response.length} chars), falling back`);
-    }
-
-    this.callbacks.onResponse(usableResponse);
-    await this.speakReply(usableResponse);
+    return response;
   }
 
-  /** [6] TTS the response, wait until the whole chain drains. */
+  /** TTS the response text, wait until the whole chain drains. */
   private async speakReply(text: string): Promise<void> {
     if (!this.tts || !this.settings.tts.enabled || !text.trim()) {
-      await this.onTurnComplete();
       return;
     }
 
-    this.setPhase("speaking");
-    this.vad2.setMode("watch-speaking");
-    this.vad2.rearm();
     this.perfTracker.startTTS();
-
     this.enqueueTTS(text);
     await this.ttsChain;
-
-    if (!this.sessionAlive) return; // cancelled while speaking
-    if (this.bargeInPending) return; // onBargeIn already moved us to listening
-
-    const ttsLatency = this.perfTracker.getTTSFirstTokenLatency();
-    const metrics = this.perfTracker.getMetrics(
-      this.lastAsrDuration,
-      this.lastLlmDuration,
-      ttsLatency
-    );
-    this.callbacks.onPerformanceMetrics?.(metrics);
-
-    await this.onTurnComplete();
   }
 
-  /** [7] Turn done. If sessionMode → back to listening. Otherwise idle. */
-  private async onTurnComplete(): Promise<void> {
-    this.perfTracker.reset();
-    this.vad2.setMode("off");
-
-    if (this.sessionMode && this.sessionAlive) {
-      // Echo cooldown so VAD doesn't trigger on lingering speaker output.
-      await new Promise((r) => setTimeout(r, SESSION_ECHO_COOLDOWN_MS));
-      await this.beginListeningPhase();
-    } else {
-      this.setPhase("idle");
-      if (this.sessionAlive) this.endSession("turn-complete");
-    }
-  }
-
-  /** [X] Vad2 detected the user speaking during thinking/speaking. */
-  private onBargeIn(): void {
-    if (this.phase !== "thinking" && this.phase !== "speaking") return;
-    debugLog("VAD2", `barge-in during ${this.phase}`);
-
-    // Cancel current work.
+  /** Cancel all in-flight work (orchestrator + TTS + player). */
+  private abortCurrentWork(): void {
     this.orchestrator?.abort();
     this.ttsAborted = true;
     this.player.stop();
@@ -583,62 +464,31 @@ export class VoicePipeline {
     this.asrSession?.close();
     this.asrSession = null;
     this.vad1.stop();
-
-    this.bargeInPending = true;
-
-    // Jump straight into a new listening phase; if the user doesn't speak
-    // within BARGE_IN_GRACE_MS, Vad1.onIdleTimeout fires and we prompt them.
-    // (Vad1's default idleTimeoutMs is 5s; override per-call by reconfiguring
-    // would over-complicate. We rely on Vad1 default + bargeInPending flag.)
-    void this.beginListeningPhase();
   }
 
-  /** Vad1 idle timeout: nobody talked in time. */
-  private async onVad1IdleTimeout(): Promise<void> {
-    if (this.bargeInPending) {
-      // False barge-in — Vad2 fired but user said nothing. Ask them.
-      debugLog("BARGE-IN", "no follow-up speech → prompting user");
-      this.bargeInPending = false;
-      this.vad1.stop();
-      this.clearAsrFinalTimer();
+  // ============================================================
+  // INTERNALS
+  // ============================================================
+
+  private armAsrFinalTimer(): void {
+    this.clearAsrFinalTimer();
+    this.asrFinalTimer = setTimeout(() => {
+      this.asrFinalTimer = null;
+      debugLog("ASR", `final transcript timed out after ${ASR_FINAL_TIMEOUT_MS / 1000}s — treating as empty`);
+      // No transcript means: ASR heard nothing usable. In Session Mode loop
+      // back to listening; otherwise idle out cleanly. Don't surface an error
+      // — the pipeline already torn down ASR via close()-equivalent below.
       this.asrSession?.close();
       this.asrSession = null;
-      this.setPhase("speaking");
-      this.vad2.setMode("watch-speaking");
-      this.vad2.rearm();
-      this.callbacks.onResponse(this.bargeInPromptText);
-      this.enqueueTTS(this.bargeInPromptText);
-      await this.ttsChain;
-      await this.onTurnComplete();
-      return;
-    }
-
-    // Session Mode idle: user has been silent the whole listening window.
-    if (this.sessionMode) {
-      debugLog("SESSION", "vad1 idle in listening → ending session");
-      this.endSession("idle-timeout");
-    } else {
-      this.handleAsrError("Didn't hear anything");
-    }
+      void this.controller.onTranscript("");
+    }, ASR_FINAL_TIMEOUT_MS);
   }
 
-  // ============================================================
-  // SESSION LIFECYCLE
-  // ============================================================
-
-  private setSessionAlive(alive: boolean): void {
-    if (this.sessionAlive === alive) return;
-    this.sessionAlive = alive;
-    this.callbacks.onSessionActiveChange?.(alive);
-  }
-
-  /** Single sink for ending a session. mic resets here. */
-  private endSession(reason: string): void {
-    debugLog("SESSION", `endSession reason=${reason}`);
-    this.sessionMode = false;
-    this.tearDownAudio();
-    this.setPhase("idle");
-    this.setSessionAlive(false);
+  private clearAsrFinalTimer(): void {
+    if (this.asrFinalTimer) {
+      clearTimeout(this.asrFinalTimer);
+      this.asrFinalTimer = null;
+    }
   }
 
   private tearDownAudio(): void {
@@ -652,43 +502,6 @@ export class VoicePipeline {
     this.clearAsrFinalTimer();
     this.asrSession?.close();
     this.asrSession = null;
-  }
-
-  // ============================================================
-  // INTERNALS
-  // ============================================================
-
-  private setPhase(phase: Phase): void {
-    if (this.phase === phase) return;
-    debugLog("PHASE", `${this.phase} → ${phase}`);
-    this.phase = phase;
-    this.callbacks.onStateChange(phase as PipelineState);
-  }
-
-  private armAsrFinalTimer(): void {
-    this.clearAsrFinalTimer();
-    this.asrFinalTimer = setTimeout(() => {
-      this.asrFinalTimer = null;
-      debugLog("ASR", `final transcript timed out after ${ASR_FINAL_TIMEOUT_MS / 1000}s — treating as empty`);
-      // No transcript means: ASR heard nothing usable. In Session Mode loop
-      // back to listening; otherwise idle out cleanly. Don't surface an error
-      // — the pipeline already torn down ASR via close()-equivalent below.
-      this.asrSession?.close();
-      this.asrSession = null;
-      void this.onTranscript("");
-    }, ASR_FINAL_TIMEOUT_MS);
-  }
-
-  private clearAsrFinalTimer(): void {
-    if (this.asrFinalTimer) {
-      clearTimeout(this.asrFinalTimer);
-      this.asrFinalTimer = null;
-    }
-  }
-
-  private handleAsrError(msg: string): void {
-    this.callbacks.onError(msg);
-    this.endSession("error");
   }
 
   private enqueueTTS(text: string): void {
