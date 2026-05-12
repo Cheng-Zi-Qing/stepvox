@@ -3,9 +3,9 @@
 //
 // 1. Pick a layer:
 //    - "read"      — never modifies the vault, always allowed
-//    - "write"     — modifies the vault, no extra confirmation
-//    - "dangerous" — destructive; executor refuses to run until the LLM has
-//                    confirmed with the user in a prior turn
+//    - "write"     — modifies the vault (no executor-level gate; per-tool
+//                    guards apply, e.g. create_file refuses to overwrite,
+//                    move_file refuses to clobber destination)
 //    - "system"    — plugin meta (memory, settings); not vault content
 //
 // 2. Create a new file at `src/agent/tools/{layer}/{name}.ts`. Copy the
@@ -73,8 +73,8 @@ export function getToolByName(name: string): Tool | undefined {
   return TOOL_REGISTRY.find((t) => t.name === name);
 }
 
-export function getToolLayer(name: string): ToolLayer {
-  return getToolByName(name)?.layer ?? "dangerous";
+export function getToolLayer(name: string): ToolLayer | undefined {
+  return getToolByName(name)?.layer;
 }
 
 export type { Tool, ToolContext, ToolLayer, ToolServices } from "./types";

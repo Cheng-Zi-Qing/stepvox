@@ -25,17 +25,17 @@ describe("getToolLayer", () => {
     expect(getToolLayer("update_memory")).toBe("system");
   });
 
-  it("set_focus is removed — treated as dangerous (unknown)", () => {
-    expect(getToolLayer("set_focus")).toBe("dangerous");
+  it("set_focus is removed — returns undefined", () => {
+    expect(getToolLayer("set_focus")).toBeUndefined();
   });
 
   it("TOOL_DEFINITIONS does not contain set_focus", () => {
     expect(TOOL_DEFINITIONS.find((t) => t.name === "set_focus")).toBeUndefined();
   });
 
-  it("defaults unknown tools to dangerous", () => {
-    expect(getToolLayer("delete_file")).toBe("dangerous");
-    expect(getToolLayer("rename_file")).toBe("dangerous");
-    expect(getToolLayer("anything_unknown")).toBe("dangerous");
+  it("returns undefined for unknown tools", () => {
+    expect(getToolLayer("delete_file")).toBeUndefined();
+    expect(getToolLayer("rename_file")).toBeUndefined();
+    expect(getToolLayer("anything_unknown")).toBeUndefined();
   });
 });

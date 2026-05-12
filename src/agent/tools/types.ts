@@ -1,7 +1,7 @@
 import type { App } from "obsidian";
 import type { SearchProvider } from "../../providers/search";
 
-export type ToolLayer = "read" | "write" | "dangerous" | "system";
+export type ToolLayer = "read" | "write" | "system";
 
 /**
  * External services a tool may need at runtime. Optional — tools must check

@@ -43,14 +43,6 @@ export class ToolExecutor {
       };
     }
 
-    if (tool.layer === "dangerous") {
-      return {
-        id: call.id,
-        content: `Rejected: "${call.name}" requires user confirmation. Ask the user first.`,
-        success: false,
-      };
-    }
-
     const ctx: ToolContext = {
       app: this.app,
       pluginDataDir: this.pluginDataDir,
