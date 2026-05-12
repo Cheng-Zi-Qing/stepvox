@@ -34,7 +34,9 @@ Use this if you don't want to install another plugin, or if BRAT isn't an option
    - `styles.css`
 2. In your vault, navigate to `.obsidian/plugins/`. Create a new folder called `stepvox`.
 3. Drop all three files inside `.obsidian/plugins/stepvox/`.
-4. In Obsidian: **Settings → Community plugins**, click the refresh icon, find **StepVox**, enable it.
+4. In Obsidian: **Settings → Community plugins**. If "Restricted mode" (or "Safe mode" on older versions) is on, turn it off — you'll see a "Turn on community plugins" button.
+5. Reload Obsidian (Cmd/Ctrl + R, or quit and relaunch) so it picks up the new plugin folder.
+6. Go back to **Settings → Community plugins → Installed plugins**, find **StepVox**, flip the toggle on.
 
 When we ship an update, re-download the three files and overwrite.
 
@@ -114,7 +116,9 @@ What helps us:
    - `styles.css`
 2. 在你的 vault 里找到 `.obsidian/plugins/` 目录，新建一个叫 `stepvox` 的文件夹。
 3. 把三个文件丢进 `.obsidian/plugins/stepvox/`。
-4. Obsidian 里 **Settings → Community plugins**，点刷新图标，找到 **StepVox**，开启。
+4. Obsidian 里 **Settings → Community plugins**。如果"受限模式 / Restricted mode"（旧版叫 "Safe mode"）是开的，先关掉 —— 会看到一个 "Turn on community plugins" 按钮点一下。
+5. **重载 Obsidian**（Cmd/Ctrl + R，或者退出重新打开）—— Obsidian 只在启动时扫一次 plugins 目录，不重载看不到新插件。
+6. 回到 **Settings → Community plugins → Installed plugins**，找到 **StepVox**，打开开关。
 
 更新时重新下载三个文件覆盖即可。
 
