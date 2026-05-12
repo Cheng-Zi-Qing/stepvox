@@ -225,3 +225,30 @@
   font-weight: var(--font-semibold);
   color: var(--text-accent);
 }
+
+/* Personality block edit modal */
+.stepvox-prompt-modal {
+  width: min(720px, 90vw);
+}
+
+.stepvox-prompt-modal-default {
+  white-space: pre-wrap;
+  background: var(--background-secondary);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+
+.stepvox-prompt-modal-textarea {
+  width: 100%;
+  margin-top: 12px;
+  font-family: var(--font-monospace);
+  font-size: 0.9em;
+}
+
+.stepvox-prompt-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

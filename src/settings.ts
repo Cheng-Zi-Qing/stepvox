@@ -623,7 +623,7 @@ class PromptBlockEditModal extends Modal {
 
   onOpen(): void {
     const { contentEl, modalEl } = this;
-    modalEl.style.width = "min(720px, 90vw)";
+    modalEl.addClass("stepvox-prompt-modal");
     contentEl.empty();
 
     contentEl.createEl("h2", { text: `Edit ${this.label}` });
@@ -634,28 +634,15 @@ class PromptBlockEditModal extends Modal {
 
     const defaultBox = contentEl.createEl("details");
     defaultBox.createEl("summary", { text: "Show default" });
-    const defaultPre = defaultBox.createEl("pre");
-    defaultPre.style.whiteSpace = "pre-wrap";
-    defaultPre.style.background = "var(--background-secondary)";
-    defaultPre.style.padding = "8px 12px";
-    defaultPre.style.borderRadius = "6px";
-    defaultPre.style.fontSize = "0.85em";
+    const defaultPre = defaultBox.createEl("pre", { cls: "stepvox-prompt-modal-default" });
     defaultPre.setText(this.defaultText || "(no default)");
 
-    const textarea = contentEl.createEl("textarea");
+    const textarea = contentEl.createEl("textarea", { cls: "stepvox-prompt-modal-textarea" });
     textarea.value = this.currentText;
     textarea.placeholder = this.defaultText;
     textarea.rows = 12;
-    textarea.style.width = "100%";
-    textarea.style.marginTop = "12px";
-    textarea.style.fontFamily = "var(--font-monospace)";
-    textarea.style.fontSize = "0.9em";
 
-    const buttonRow = contentEl.createDiv();
-    buttonRow.style.display = "flex";
-    buttonRow.style.justifyContent = "flex-end";
-    buttonRow.style.gap = "8px";
-    buttonRow.style.marginTop = "16px";
+    const buttonRow = contentEl.createDiv({ cls: "stepvox-prompt-modal-buttons" });
 
     const cancelBtn = buttonRow.createEl("button", { text: "Cancel" });
     cancelBtn.addEventListener("click", () => this.close());
