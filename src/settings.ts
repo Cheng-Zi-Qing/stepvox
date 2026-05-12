@@ -9,6 +9,8 @@ import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type StepVoxPlugin from "./main";
 import { LLM_PROVIDERS, getLLMProviderEntry } from "./providers/llm/registry";
 import type { ConfigField } from "./providers/llm/registry";
+import { PROMPT_BLOCKS } from "./agent/prompt";
+import type { PromptBlock } from "./agent/prompt";
 
 interface VoiceDetail {
   "voice-name": string;
@@ -64,6 +66,12 @@ export interface StepVoxSettings {
     provider: "tavily" | "exa" | "none";
     apiKey: string;
   };
+  prompt: {
+    /** Single-line identity statement. Empty falls back to default (D61). */
+    identity: string;
+    /** Multi-line personality bullets. Empty falls back to default (D61). */
+    personalityTraits: string;
+  };
   debug: {
     enabled: boolean;
   };
@@ -105,6 +113,10 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
   search: {
     provider: "none",
     apiKey: "",
+  },
+  prompt: {
+    identity: "",
+    personalityTraits: "",
   },
   debug: {
     enabled: false,
@@ -425,6 +437,10 @@ export class StepVoxSettingTab extends PluginSettingTab {
         );
     }
 
+    // Personality (D61: Identity + Personality traits — only style is exposed)
+    new Setting(containerEl).setName("Personality").setHeading();
+    this.renderEditablePromptBlocks(containerEl);
+
     // Debug
     new Setting(containerEl).setName("Debug").setHeading();
     new Setting(containerEl)
@@ -499,6 +515,43 @@ export class StepVoxSettingTab extends PluginSettingTab {
           });
         });
       }
+    }
+  }
+
+  /**
+   * Render every PromptBlock with `editable: true` as a textarea bound to
+   * `settings.prompt.<storageKey>` (D61). Blank values fall back to each
+   * block's default at render time, so the "Reset" button just writes "".
+   */
+  private renderEditablePromptBlocks(containerEl: HTMLElement): void {
+    const editable = PROMPT_BLOCKS.filter((b): b is PromptBlock & { storageKey: keyof StepVoxSettings["prompt"]; default: string } =>
+      b.editable === true && !!b.storageKey
+    );
+    for (const block of editable) {
+      const key = block.storageKey;
+      const current = this.plugin.settings.prompt[key] ?? "";
+      const setting = new Setting(containerEl)
+        .setName(block.label ?? block.id)
+        .setDesc(`Leave blank to use the default. Default:\n${block.default ?? ""}`);
+
+      setting.addTextArea((ta) => {
+        ta.setPlaceholder(block.default ?? "")
+          .setValue(current)
+          .onChange(async (value) => {
+            this.plugin.settings.prompt[key] = value;
+            await this.plugin.saveSettings();
+          });
+        ta.inputEl.rows = 4;
+        ta.inputEl.style.width = "100%";
+      });
+
+      setting.addButton((btn) =>
+        btn.setButtonText("Reset").onClick(async () => {
+          this.plugin.settings.prompt[key] = "";
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
     }
   }
 }

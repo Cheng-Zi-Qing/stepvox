@@ -12,7 +12,7 @@ import { TavilyProvider, ExaProvider } from "../providers/search";
 import type { ASRProvider, TTSProvider, LLMProvider, ASRStreamSession } from "../providers";
 import { AgentOrchestrator } from "../agent/orchestrator";
 import { ToolExecutor } from "../agent/tool-executor";
-import { buildSystemPrompt } from "../agent/system-prompt";
+import { buildSystemPrompt } from "../agent/prompt";
 import { getASREndpoint, getTTSEndpoint } from "../utils/endpoint";
 import { PerformanceTracker } from "../utils/performance-stats";
 import type { PerformanceMetrics } from "../utils/performance-stats";
@@ -687,7 +687,7 @@ export class VoicePipeline {
     this.orchestrator = new AgentOrchestrator({
       provider: this.llm!,
       toolExecutor: this.toolExecutor,
-      systemPromptBuilder: () => buildSystemPrompt(this.app, this.currentVaultSnapshot),
+      systemPromptBuilder: () => buildSystemPrompt(this.app, this.settings, this.currentVaultSnapshot),
     });
   }
 

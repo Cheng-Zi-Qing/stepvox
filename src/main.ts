@@ -135,6 +135,7 @@ export default class StepVoxPlugin extends Plugin {
       interaction: { ...DEFAULT_SETTINGS.interaction, ...m.interaction },
       audio: { ...DEFAULT_SETTINGS.audio, ...m.audio },
       search: { ...DEFAULT_SETTINGS.search, ...m.search },
+      prompt: { ...DEFAULT_SETTINGS.prompt, ...m.prompt },
       debug: { ...DEFAULT_SETTINGS.debug, ...m.debug },
     };
     // Persist the migrated shape so subsequent loads skip migration.
