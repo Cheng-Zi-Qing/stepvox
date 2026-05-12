@@ -34,6 +34,36 @@ const BARGE_IN_GRACE_MS = 3_000;
 
 const SESSION_EXIT_KEYWORDS = ["退出", "结束", "停止", "退下", "exit", "stop", "quit"];
 
+/**
+ * Short filler/noise tokens that ASR returns when the user clears their
+ * throat, breathes, or VAD2 fires on background noise. Treating these as
+ * real user turns wastes an LLM round and produces an unhelpful "嗯，我
+ *在呢" reply that occupies the mic while the user is trying to ask the
+ * real question. We silently drop them and re-arm listening instead.
+ *
+ * Match rule (in isNoiseLike): trimmed text is 1-2 chars AND those chars
+ * are all in this set (optionally followed by terminal punctuation).
+ */
+const FILLER_TOKENS = new Set([
+  "嗯", "啊", "呃", "诶", "哦", "唔", "呀", "哎", "哈", "喔",
+  "嗯嗯", "啊啊", "哦哦", "嗯哼",
+  "um", "uh", "er", "ah", "oh",
+]);
+const TERMINAL_PUNCT = /[。.,?!？！，、]$/;
+
+export function isNoiseLike(text: string): boolean {
+  const stripped = text.replace(TERMINAL_PUNCT, "").trim();
+  if (stripped.length === 0 || stripped.length > 2) return false;
+  return FILLER_TOKENS.has(stripped) || FILLER_TOKENS.has(stripped.toLowerCase());
+}
+
+// After this many consecutive noise-like ASR results in session mode,
+// end the session. Prevents the mic from staying hot forever when the
+// user has walked away and the room has ambient noise that VAD2 keeps
+// firing on. Resets to 0 the moment a real (non-noise) transcript
+// arrives or the user actively cancels/restarts.
+const MAX_CONSECUTIVE_NOISE = 3;
+
 // Fallback phrase when the LLM produces no usable text (e.g. emits a
 // tool_call XML payload at R3 instead of a natural-language summary).
 const FALLBACK_APOLOGY = "抱歉，刚才没能整理好结果。你能再说一遍或换种说法吗？";
@@ -169,6 +199,7 @@ export class VoicePipeline {
   private asrSession: ASRStreamSession | null = null;
   private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
   private bargeInPending = false;       // set true between onBargeIn() and the next ASR result
+  private consecutiveNoise = 0;         // streak of noise-like ASR results; reset on real input
   private spokenToolStatus = new Set<string>(); // per-turn de-dup so the user doesn't hear the same status twice
   private bargeInPromptText = "刚刚被打断了，您还有什么需要？";
   private suppressNextEcho = false;     // Vad1 onIdleTimeout in a fresh listen → suppress mic restart
@@ -234,6 +265,7 @@ export class VoicePipeline {
   async startSession(sessionMode: boolean): Promise<void> {
     debugLog("SESSION", `startSession sessionMode=${sessionMode}`);
     this.sessionMode = sessionMode;
+    this.consecutiveNoise = 0;
     this.setSessionAlive(true);
     this.rebuildProvidersIfNeeded();
 
@@ -369,6 +401,35 @@ export class VoicePipeline {
       }
       return;
     }
+
+    // Filler-only utterances ("嗯", "啊", "uh") usually mean ASR caught
+    // background noise / throat-clearing, NOT a real user turn. Treat
+    // them like an empty transcript: silently re-arm listening in
+    // session mode rather than wasting an LLM round and occupying the
+    // mic with an "嗯, 我在呢" reply that talks over the user's real
+    // next question. Track a streak so we don't loop forever — if the
+    // user has clearly walked away (or background noise is persistent)
+    // end the session after MAX_CONSECUTIVE_NOISE in a row.
+    if (isNoiseLike(trimmed)) {
+      this.consecutiveNoise += 1;
+      debugLog(
+        "ASR",
+        `noise-like input "${trimmed}" (streak ${this.consecutiveNoise}/${MAX_CONSECUTIVE_NOISE})`
+      );
+      if (this.consecutiveNoise >= MAX_CONSECUTIVE_NOISE) {
+        debugLog("SESSION", `noise streak ${this.consecutiveNoise} — ending session`);
+        this.endSession("noise-timeout");
+        return;
+      }
+      if (this.sessionMode && this.sessionAlive) {
+        await this.beginListeningPhase();
+      } else {
+        this.endSession("idle-timeout");
+      }
+      return;
+    }
+    // Real transcript — reset the streak.
+    this.consecutiveNoise = 0;
 
     this.callbacks.onFinalTranscript(trimmed);
 
