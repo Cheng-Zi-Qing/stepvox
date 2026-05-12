@@ -112,7 +112,7 @@ See [`scripts/README.md`](scripts/README.md) for the full diagnostic table (mapp
 |---------|-------|
 | "ASR not configured" | Missing StepFun API key in settings. |
 | Mic icon doesn't activate | Obsidian doesn't have microphone permission. macOS: System Settings → Privacy & Security → Microphone. |
-| Silence is being transcribed as filler ("嗯", "啊", …) | Working as designed — these are filtered out before reaching the LLM. After 3 consecutive noise hits the session ends with reason `noise-timeout`. |
+| Silence is being transcribed as filler ("en", "ah", …) | Working as designed — these are filtered out before reaching the LLM. After 3 consecutive noise hits the session ends with reason `noise-timeout`. |
 | Long replies get cut into multiple TTS chunks | Working as designed — chunks synth and play in parallel. If you want shorter replies, edit the Personality block to ask for terser output. |
 | LLM hangs / times out | Use **Settings → LLM → Test Connection**. Check API key, region, and rate limits with your provider. |
 | Want detailed logs | Enable **Settings → Debug → Debug mode**. Logs go to browser console *and* `.obsidian/plugins/stepvox/debug.log`. |
