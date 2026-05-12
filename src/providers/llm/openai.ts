@@ -5,6 +5,7 @@ import type {
   ToolDefinition,
   ToolCall,
 } from "../types";
+import { requestUrlWithAbort } from "../../utils/request-url-with-abort";
 
 interface OpenAIConfig {
   endpoint: string;
@@ -76,22 +77,24 @@ export class OpenAIProvider implements LLMProvider {
       }));
     }
 
-    const response = await fetch(this.chatURL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.config.apiKey}`,
-        "Content-Type": "application/json",
+    const response = await requestUrlWithAbort(
+      {
+        url: this.chatURL,
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-      signal: request.signal,
-    });
+      request.signal
+    );
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`OpenAI API error (${response.status}): ${text}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`OpenAI API error (${response.status}): ${response.text}`);
     }
 
-    const data = await response.json();
+    const data = response.json;
     const msg = data.choices?.[0]?.message;
     if (!msg) {
       throw new Error("LLM response missing message");

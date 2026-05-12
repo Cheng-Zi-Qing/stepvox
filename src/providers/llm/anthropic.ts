@@ -5,6 +5,7 @@ import type {
   ToolDefinition,
   ToolCall,
 } from "../types";
+import { requestUrlWithAbort } from "../../utils/request-url-with-abort";
 
 interface AnthropicConfig {
   endpoint: string;
@@ -58,23 +59,25 @@ export class AnthropicProvider implements LLMProvider {
       }));
     }
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": this.config.apiKey,
-        "anthropic-version": "2023-06-01",
+    const response = await requestUrlWithAbort(
+      {
+        url,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": this.config.apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify(body),
-      signal: request.signal,
-    });
+      request.signal
+    );
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`Anthropic API error (${response.status}): ${text}`);
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Anthropic API error (${response.status}): ${response.text}`);
     }
 
-    const data = await response.json();
+    const data = response.json;
 
     const textContent = data.content?.find((c: any) => c.type === "text")?.text ?? null;
     const toolUses = data.content?.filter((c: any) => c.type === "tool_use") ?? [];
