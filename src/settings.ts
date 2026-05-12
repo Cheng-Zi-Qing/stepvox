@@ -441,6 +441,28 @@ export class StepVoxSettingTab extends PluginSettingTab {
     new Setting(containerEl).setName("Personality").setHeading();
     this.renderEditablePromptBlocks(containerEl);
 
+    // Hotkeys — direct user to Obsidian's built-in hotkey manager.
+    new Setting(containerEl).setName("Hotkeys").setHeading();
+    new Setting(containerEl)
+      .setName("快捷键配置")
+      .setDesc("StepVox 仅提供一个快捷键：Toggle voice recording —— 触发一次等同于点击面板上的麦克风按钮。请在 Obsidian 的 Settings → Hotkeys 中搜索 \"StepVox\" 进行绑定。")
+      .addButton((btn) =>
+        btn.setButtonText("打开 Hotkeys 设置").onClick(() => {
+          // Navigate Obsidian to its Hotkeys settings page, scoped to "StepVox".
+          const setting = (this.app as unknown as {
+            setting?: { open: () => void; openTabById: (id: string) => unknown };
+          }).setting;
+          if (setting?.openTabById) {
+            setting.open();
+            const tab = setting.openTabById("hotkeys") as { searchComponent?: { setValue: (v: string) => void; onChanged?: () => void } } | undefined;
+            tab?.searchComponent?.setValue("StepVox");
+            tab?.searchComponent?.onChanged?.();
+          } else {
+            new Notice("请打开 Settings → Hotkeys 搜索 StepVox");
+          }
+        })
+      );
+
     // Debug
     new Setting(containerEl).setName("Debug").setHeading();
     new Setting(containerEl)

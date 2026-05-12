@@ -87,28 +87,6 @@ export default class StepVoxPlugin extends Plugin {
       name: "Toggle voice recording",
       callback: () => this.toggleRecording(),
     });
-
-    this.addCommand({
-      id: "start-recording",
-      name: "Start voice recording",
-      callback: () => {
-        if (!this.isRecording) this.toggleRecording();
-      },
-    });
-
-    this.addCommand({
-      id: "stop-recording",
-      name: "Stop voice recording",
-      callback: () => {
-        if (this.isRecording) this.toggleRecording();
-      },
-    });
-
-    this.addCommand({
-      id: "toggle-session-mode",
-      name: "Toggle session mode",
-      callback: () => this.toggleSessionMode(),
-    });
   }
 
   onunload(): void {
@@ -164,12 +142,6 @@ export default class StepVoxPlugin extends Plugin {
       this.isRecording = true;
       void this.pipeline.startSession(this.settings.interaction.enableSessionMode);
     }
-  }
-
-  private toggleSessionMode(): void {
-    this.settings.interaction.enableSessionMode = !this.settings.interaction.enableSessionMode;
-    void this.saveSettings();
-    this.getView()?.setSessionMode(this.settings.interaction.enableSessionMode);
   }
 
   private getView(): StepVoxView | null {

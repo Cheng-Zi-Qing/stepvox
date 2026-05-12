@@ -45,8 +45,12 @@ export class StepVoxView extends ItemView {
 
     this.clearBtn = header.createEl("button", { cls: "stepvox-clear-btn" });
     this.clearBtn.setAttribute("aria-label", "Clear conversation history");
+    this.clearBtn.title = "清空对话记录与缓存";
     setIcon(this.clearBtn, "eraser");
-    this.clearBtn.addEventListener("click", () => this.onClearHistory?.());
+    this.clearBtn.addEventListener("click", () => {
+      this.clearConversation();
+      this.onClearHistory?.();
+    });
 
     this.statusEl = header.createDiv({ cls: "stepvox-status" });
     this.renderStatus();
@@ -83,6 +87,19 @@ export class StepVoxView extends ItemView {
 
   setOnClearHistory(fn: () => void): void {
     this.onClearHistory = fn;
+  }
+
+  /**
+   * Wipe the on-screen conversation log (this view's local state) so it
+   * stays in sync with the orchestrator's history, which the parent
+   * clears via `onClearHistory` at the same time. Called from the clear
+   * button and from setSessionMode when entering a new session.
+   */
+  clearConversation(): void {
+    this.conversation = [];
+    this.clearPartial();
+    this.clearToolStatus();
+    this.renderConversation();
   }
 
   setPipelineState(state: PipelineState): void {
