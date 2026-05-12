@@ -13,18 +13,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export interface StepVoxData {
+  schemaVersion?: number;
   stepfun: { region: "china" | "global"; mode: "api" | "plan"; apiKey: string };
   asr: { provider: string; apiKey?: string; model: string; language: string };
   tts: { enabled: boolean; provider: string; apiKey?: string; model: string; voice: string; speed: number; volume?: number };
   llm: {
-    provider: "stepfun" | "openai" | "anthropic" | "custom";
-    stepfunMode: "api" | "plan";
-    endpoint: string;
-    apiKey: string;
-    model: string;
-    temperature: number;
-    [REDACTED]?: string;
-    format?: string;
+    activeProvider: "stepfun" | "openai" | "anthropic" | "custom";
+    providerConfigs: {
+      stepfun?: { stepfunMode: "api" | "plan"; model: string; temperature: number };
+      openai?: { apiKey: string; model: string; temperature: number };
+      anthropic?: { apiKey: string; model: string; temperature: number };
+      custom?: { endpoint: string; apiKey: string; model: string; temperature: number };
+    };
   };
   audio: { sampleRate: number; noiseSuppression: boolean; echoCancellation: boolean };
   execution?: { vaultName?: string; commandTimeout?: number; confirmDestructive?: boolean; confirmAllWrites?: boolean };

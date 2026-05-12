@@ -23,42 +23,51 @@ import { loadStepVoxData, type StepVoxData } from "./_lib/load-data";
 
 function buildProvider(data: StepVoxData): { provider: LLMProvider; label: string; endpoint: string } {
   const { llm, stepfun } = data;
-  switch (llm.provider) {
+  const activeId = llm.activeProvider;
+  switch (activeId) {
     case "stepfun": {
+      const cfg = llm.providerConfigs.stepfun;
+      if (!cfg) throw new Error("StepFun provider config missing");
       const domain = stepfun.region === "china" ? "stepfun.com" : "stepfun.ai";
-      const prefix = llm.stepfunMode === "plan" ? "step_plan/" : "";
+      const prefix = cfg.stepfunMode === "plan" ? "step_plan/" : "";
       const endpoint = `https://api.${domain}/${prefix}v1/chat/completions`;
       return {
-        provider: new OpenAIProvider(endpoint, stepfun.apiKey || llm.apiKey, llm.model, llm.temperature),
-        label: `StepFun (${stepfun.region}, ${llm.stepfunMode})`,
+        provider: new OpenAIProvider(endpoint, stepfun.apiKey, cfg.model, cfg.temperature),
+        label: `StepFun (${stepfun.region}, ${cfg.stepfunMode})`,
         endpoint,
       };
     }
     case "openai": {
+      const cfg = llm.providerConfigs.openai;
+      if (!cfg) throw new Error("OpenAI provider config missing");
       const endpoint = "https://api.openai.com/v1";
       return {
-        provider: new OpenAIProvider(endpoint, llm.apiKey, llm.model, llm.temperature),
+        provider: new OpenAIProvider(endpoint, cfg.apiKey, cfg.model, cfg.temperature),
         label: "OpenAI",
         endpoint,
       };
     }
     case "anthropic": {
+      const cfg = llm.providerConfigs.anthropic;
+      if (!cfg) throw new Error("Anthropic provider config missing");
       const endpoint = "https://api.anthropic.com";
       return {
-        provider: new AnthropicProvider(endpoint, llm.apiKey, llm.model, llm.temperature),
+        provider: new AnthropicProvider(endpoint, cfg.apiKey, cfg.model, cfg.temperature),
         label: "Anthropic",
         endpoint,
       };
     }
     case "custom": {
+      const cfg = llm.providerConfigs.custom;
+      if (!cfg) throw new Error("Custom provider config missing");
       return {
-        provider: new OpenAIProvider(llm.endpoint, llm.apiKey, llm.model, llm.temperature),
-        label: `Custom (${llm.endpoint})`,
-        endpoint: llm.endpoint,
+        provider: new OpenAIProvider(cfg.endpoint, cfg.apiKey, cfg.model, cfg.temperature),
+        label: `Custom (${cfg.endpoint})`,
+        endpoint: cfg.endpoint,
       };
     }
     default:
-      throw new Error(`Unknown LLM provider: ${(llm as any).provider}`);
+      throw new Error(`Unknown LLM provider: ${activeId as string}`);
   }
 }
 
@@ -93,11 +102,15 @@ async function main() {
   console.log(`Loaded settings from: ${path}`);
 
   const { provider, label, endpoint } = buildProvider(data);
-  const apiKey = data.llm.provider === "stepfun" ? (data.stepfun.apiKey || data.llm.apiKey) : data.llm.apiKey;
+  const activeId = data.llm.activeProvider;
+  const cfg = data.llm.providerConfigs[activeId] as any;
+  const apiKey: string =
+    activeId === "stepfun" ? data.stepfun.apiKey : (cfg?.apiKey ?? "");
+  const model: string = cfg?.model ?? "(unknown)";
 
   console.log(`Provider: ${label}`);
   console.log(`Endpoint: ${endpoint}`);
-  console.log(`Model: ${data.llm.model}`);
+  console.log(`Model: ${model}`);
   console.log(`API Key: ${apiKey.slice(0, 8)}...`);
 
   if (!apiKey) {
