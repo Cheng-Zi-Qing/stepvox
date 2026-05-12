@@ -48,7 +48,6 @@ export interface StepVoxSettings {
   };
   interaction: {
     enableSessionMode: boolean;
-    silenceTimeout: number;
   };
   audio: {
     sampleRate: number;
@@ -92,7 +91,6 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
   },
   interaction: {
     enableSessionMode: false,
-    silenceTimeout: 1500,
   },
   audio: {
     sampleRate: DEFAULT_SAMPLE_RATE,
