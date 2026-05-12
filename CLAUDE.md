@@ -10,4 +10,6 @@ Default label vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-h
 
 ### Domain docs
 
-Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+`CONTEXT.md` lives at the repo root and is the canonical domain-language reference.
+
+Architectural decision records (ADRs) live OUTSIDE the repo, in the maintainer's Obsidian vault at `~/Documents/Obsidian Vault/workspace/StepVox/stepvox.decisions.md`. Feature docs are colocated with the ADRs under that vault path. See `docs/agents/domain.md` for the full layout, why decisions live in the vault, and how to consume them when running with or without vault access.
