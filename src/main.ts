@@ -1,6 +1,6 @@
 import { Plugin } from "obsidian";
 import { VIEW_TYPE_STEPVOX } from "./constants";
-import { DEFAULT_SETTINGS, StepVoxSettingTab } from "./settings";
+import { DEFAULT_SETTINGS, StepVoxSettingTab, migrateSettings, SETTINGS_SCHEMA_VERSION } from "./settings";
 import type { StepVoxSettings } from "./settings";
 import { StepVoxView } from "./ui/StepVoxView";
 import { StatusBarWidget } from "./ui/StatusBarWidget";
@@ -116,17 +116,31 @@ export default class StepVoxPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const saved = (await this.loadData()) ?? {};
+    const raw = (await this.loadData()) ?? {};
+    const migrated = migrateSettings(raw);
+    const m = migrated as Record<string, any>;
+    const savedLlm = (m.llm ?? {}) as Partial<StepVoxSettings["llm"]>;
     this.settings = {
-      stepfun: { ...DEFAULT_SETTINGS.stepfun, ...saved.stepfun },
-      asr: { ...DEFAULT_SETTINGS.asr, ...saved.asr },
-      tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts },
-      llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
-      interaction: { ...DEFAULT_SETTINGS.interaction, ...saved.interaction },
-      audio: { ...DEFAULT_SETTINGS.audio, ...saved.audio },
-      search: { ...DEFAULT_SETTINGS.search, ...saved.search },
-      debug: { ...DEFAULT_SETTINGS.debug, ...saved.debug },
+      schemaVersion: SETTINGS_SCHEMA_VERSION,
+      stepfun: { ...DEFAULT_SETTINGS.stepfun, ...m.stepfun },
+      asr: { ...DEFAULT_SETTINGS.asr, ...m.asr },
+      tts: { ...DEFAULT_SETTINGS.tts, ...m.tts },
+      llm: {
+        activeProvider: savedLlm.activeProvider ?? DEFAULT_SETTINGS.llm.activeProvider,
+        providerConfigs: {
+          ...DEFAULT_SETTINGS.llm.providerConfigs,
+          ...(savedLlm.providerConfigs ?? {}),
+        },
+      },
+      interaction: { ...DEFAULT_SETTINGS.interaction, ...m.interaction },
+      audio: { ...DEFAULT_SETTINGS.audio, ...m.audio },
+      search: { ...DEFAULT_SETTINGS.search, ...m.search },
+      debug: { ...DEFAULT_SETTINGS.debug, ...m.debug },
     };
+    // Persist the migrated shape so subsequent loads skip migration.
+    if ((raw as Record<string, unknown>).schemaVersion !== SETTINGS_SCHEMA_VERSION) {
+      await this.saveData(this.settings);
+    }
   }
 
   async saveSettings(): Promise<void> {

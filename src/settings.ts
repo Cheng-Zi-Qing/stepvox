@@ -5,9 +5,10 @@ import {
   DEFAULT_SAMPLE_RATE,
   STEPFUN_VOICES_ENDPOINT,
 } from "./constants";
-import { getChatEndpoint } from "./utils/endpoint";
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type StepVoxPlugin from "./main";
+import { LLM_PROVIDERS, getLLMProviderEntry } from "./providers/llm/registry";
+import type { ConfigField } from "./providers/llm/registry";
 
 interface VoiceDetail {
   "voice-name": string;
@@ -20,7 +21,16 @@ interface VoicesResponse {
   "voices-details": Record<string, VoiceDetail>;
 }
 
+/**
+ * Schema version for settings on disk. Bump when the layout changes in a
+ * way that requires migration (loadSettings in main.ts handles it).
+ *   1 — implicit (pre-D57): flat llm fields, no providerConfigs
+ *   2 — D57: llm.{activeProvider, providerConfigs}
+ */
+export const SETTINGS_SCHEMA_VERSION = 2;
+
 export interface StepVoxSettings {
+  schemaVersion: number;
   stepfun: {
     region: "china" | "global";
     mode: "api" | "plan";
@@ -39,12 +49,8 @@ export interface StepVoxSettings {
     speed: number;
   };
   llm: {
-    provider: "stepfun" | "openai" | "anthropic" | "custom";
-    stepfunMode: "api" | "plan";
-    endpoint: string;
-    apiKey: string;
-    model: string;
-    temperature: number;
+    activeProvider: string;                                 // e.g. "stepfun" / "openai" / "anthropic" / "custom"
+    providerConfigs: Record<string, Record<string, unknown>>;
   };
   interaction: {
     enableSessionMode: boolean;
@@ -64,6 +70,7 @@ export interface StepVoxSettings {
 }
 
 export const DEFAULT_SETTINGS: StepVoxSettings = {
+  schemaVersion: SETTINGS_SCHEMA_VERSION,
   stepfun: {
     region: "china",
     mode: "plan",
@@ -82,12 +89,10 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
     speed: 1.0,
   },
   llm: {
-    provider: "stepfun",
-    stepfunMode: "plan",
-    endpoint: "",
-    apiKey: "",
-    model: "step-3.5-flash",
-    temperature: 0.3,
+    activeProvider: "stepfun",
+    providerConfigs: {
+      stepfun: { stepfunMode: "plan", model: "step-3.5-flash", temperature: 0.3 },
+    },
   },
   interaction: {
     enableSessionMode: false,
@@ -105,6 +110,64 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
     enabled: false,
   },
 };
+
+/**
+ * One-time migration from pre-D57 settings layout to the current shape.
+ * Old layout stored llm config as flat top-level fields; we rewrite them
+ * into llm.providerConfigs keyed by provider id. Idempotent — re-running
+ * on an already-v2 blob is a no-op.
+ */
+export function migrateSettings(
+  raw: Record<string, unknown> | null | undefined
+): Record<string, unknown> {
+  const blob: Record<string, unknown> = { ...(raw ?? {}) };
+  const oldLlm = (blob.llm as Record<string, unknown> | undefined) ?? {};
+  const version = (blob.schemaVersion as number | undefined) ?? 1;
+
+  if (version >= SETTINGS_SCHEMA_VERSION) return blob;
+
+  // pre-D57: llm carried flat fields. Promote them into providerConfigs.
+  const oldProvider = (oldLlm.provider as string | undefined) ?? "stepfun";
+  const oldStepfunMode = (oldLlm.stepfunMode as string | undefined) ?? "plan";
+  const oldEndpoint = (oldLlm.endpoint as string | undefined) ?? "";
+  const oldApiKey = (oldLlm.apiKey as string | undefined) ?? "";
+  const oldModel = (oldLlm.model as string | undefined) ?? "step-3.5-flash";
+  const oldTemperature = (oldLlm.temperature as number | undefined) ?? 0.3;
+
+  const providerConfigs: Record<string, Record<string, unknown>> = {
+    stepfun: { stepfunMode: oldStepfunMode, model: "step-3.5-flash", temperature: 0.3 },
+    openai: { apiKey: "", model: "gpt-4o-mini", temperature: 0.3 },
+    anthropic: { apiKey: "", model: "claude-3-5-sonnet-latest", temperature: 0.3 },
+    custom: { endpoint: "", apiKey: "", model: "", temperature: 0.3 },
+  };
+
+  // Honour the user's existing per-provider values where applicable.
+  if (oldProvider === "stepfun") {
+    providerConfigs.stepfun = {
+      stepfunMode: oldStepfunMode,
+      model: oldModel,
+      temperature: oldTemperature,
+    };
+  } else if (oldProvider === "openai") {
+    providerConfigs.openai = { apiKey: oldApiKey, model: oldModel, temperature: oldTemperature };
+  } else if (oldProvider === "anthropic") {
+    providerConfigs.anthropic = { apiKey: oldApiKey, model: oldModel, temperature: oldTemperature };
+  } else if (oldProvider === "custom") {
+    providerConfigs.custom = {
+      endpoint: oldEndpoint,
+      apiKey: oldApiKey,
+      model: oldModel,
+      temperature: oldTemperature,
+    };
+  }
+
+  blob.llm = {
+    activeProvider: oldProvider,
+    providerConfigs,
+  };
+  blob.schemaVersion = SETTINGS_SCHEMA_VERSION;
+  return blob;
+}
 
 export class StepVoxSettingTab extends PluginSettingTab {
   plugin: StepVoxPlugin;
@@ -272,128 +335,40 @@ export class StepVoxSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Provider")
       .setDesc("选择 LLM 提供商")
-      .addDropdown((dropdown) =>
+      .addDropdown((dropdown) => {
+        for (const p of LLM_PROVIDERS) dropdown.addOption(p.id, p.name);
         dropdown
-          .addOption("stepfun", "StepFun")
-          .addOption("openai", "OpenAI")
-          .addOption("anthropic", "Anthropic")
-          .addOption("custom", "Custom (本地模型)")
-          .setValue(this.plugin.settings.llm.provider)
+          .setValue(this.plugin.settings.llm.activeProvider)
           .onChange(async (value) => {
-            this.plugin.settings.llm.provider = value as any;
+            this.plugin.settings.llm.activeProvider = value;
             await this.plugin.saveSettings();
-            this.display(); // Refresh to show/hide conditional fields
-          })
-      );
+            this.display(); // re-render fields for the new provider
+          });
+      });
 
-    // StepFun Mode (only when provider is stepfun)
-    if (this.plugin.settings.llm.provider === "stepfun") {
-      new Setting(containerEl)
-        .setName("StepFun 模式")
-        .setDesc("选择 LLM 使用的模式（可与全局模式不同）")
-        .addDropdown((dropdown) =>
-          dropdown
-            .addOption("plan", "Coding Plan")
-            .addOption("api", "API")
-            .setValue(this.plugin.settings.llm.stepfunMode)
-            .onChange(async (value) => {
-              this.plugin.settings.llm.stepfunMode = value as "api" | "plan";
-              await this.plugin.saveSettings();
-            })
-        );
+    // Auto-render the active provider's config schema. Adding a new
+    // provider requires zero edits to this UI code (D57).
+    const activeEntry = getLLMProviderEntry(this.plugin.settings.llm.activeProvider);
+    if (activeEntry) {
+      this.renderProviderConfig(containerEl, activeEntry.id, activeEntry.configSchema);
     }
 
-    // Endpoint (only when provider is custom)
-    if (this.plugin.settings.llm.provider === "custom") {
-      new Setting(containerEl)
-        .setName("Endpoint")
-        .setDesc("本地模型 API endpoint")
-        .addText((text) =>
-          text
-            .setPlaceholder("http://localhost:11434/v1")
-            .setValue(this.plugin.settings.llm.endpoint)
-            .onChange(async (value) => {
-              this.plugin.settings.llm.endpoint = value;
-              await this.plugin.saveSettings();
-            })
-        );
-    }
-
-    // API Key (only when provider is not stepfun)
-    if (this.plugin.settings.llm.provider !== "stepfun") {
-      new Setting(containerEl)
-        .setName("API Key")
-        .setDesc("LLM provider API key")
-        .addText((text) =>
-          text
-            .setPlaceholder("Enter API key")
-            .setValue(this.plugin.settings.llm.apiKey)
-            .onChange(async (value) => {
-              this.plugin.settings.llm.apiKey = value;
-              await this.plugin.saveSettings();
-            })
-        );
-    }
-    new Setting(containerEl)
-      .setName("Model")
-      .addText((text) =>
-        text
-          .setPlaceholder("Model name")
-          .setValue(this.plugin.settings.llm.model)
-          .onChange(async (value) => {
-            this.plugin.settings.llm.model = value;
-            await this.plugin.saveSettings();
-          })
-      );
     new Setting(containerEl)
       .setName("Test Connection")
-      .setDesc("Send a test request to verify endpoint, key, and model")
+      .setDesc("Send a test request to verify the active provider's settings")
       .addButton((btn) =>
         btn.setButtonText("Test").onClick(async () => {
-          const { llm, stepfun } = this.plugin.settings;
           new Notice("Testing LLM connection...");
           try {
-            let endpoint: string;
-            let apiKey: string;
-
-            if (llm.provider === "stepfun") {
-              endpoint = getChatEndpoint(stepfun.region, llm.stepfunMode);
-              apiKey = stepfun.apiKey;
-            } else {
-              endpoint = llm.endpoint;
-              apiKey = llm.apiKey;
-            }
-
-            const url = this.buildTestURL(endpoint, llm.provider === "anthropic" ? "anthropic" : "openai");
-            const headers: Record<string, string> = {
-              "Content-Type": "application/json",
-            };
-            let body: string;
-            if (llm.provider === "anthropic") {
-              headers["x-api-key"] = apiKey;
-              headers["anthropic-version"] = "2023-06-01";
-              body = JSON.stringify({
-                model: llm.model,
-                max_tokens: 32,
-                messages: [{ role: "user", content: "hi" }],
-              });
-            } else {
-              headers["Authorization"] = `Bearer ${apiKey}`;
-              body = JSON.stringify({
-                model: llm.model,
-                temperature: llm.temperature,
-                messages: [{ role: "user", content: "hi" }],
-              });
-            }
-            const resp = await fetch(url, { method: "POST", headers, body });
-            const text = await resp.text();
-            if (resp.ok) {
-              new Notice(`OK (${resp.status}). Response: ${text.slice(0, 120)}`);
-            } else {
-              new Notice(`FAILED (${resp.status}): ${text.slice(0, 200)}`);
-            }
+            const { createLLMProvider } = await import("./providers/llm/factory");
+            const provider = createLLMProvider(this.plugin.settings);
+            const resp = await provider.chat({
+              messages: [{ role: "user", content: "hi" }],
+            });
+            const preview = (resp.content ?? "").slice(0, 120);
+            new Notice(`OK. Response: ${preview}`);
           } catch (e) {
-            new Notice(`Error: ${(e as Error).message}`);
+            new Notice(`FAILED: ${(e as Error).message}`);
           }
         })
       );
@@ -465,15 +440,65 @@ export class StepVoxSettingTab extends PluginSettingTab {
       );
   }
 
-  private buildTestURL(endpoint: string, format: string): string {
-    const url = endpoint.trim().replace(/\/+$/, "");
-    if (format === "anthropic") {
-      if (url.endsWith("/messages")) return url;
-      const base = url.endsWith("/v1") ? url : `${url}/v1`;
-      return `${base}/messages`;
+  /**
+   * Auto-render an LLM provider's config schema (D57). For each ConfigField,
+   * produce the matching Setting input bound to
+   * `settings.llm.providerConfigs[providerId][field.key]`. Writes are
+   * scoped to the per-provider record so switching providers doesn't lose
+   * other providers' config.
+   */
+  private renderProviderConfig(
+    containerEl: HTMLElement,
+    providerId: string,
+    schema: ConfigField[]
+  ): void {
+    const llm = this.plugin.settings.llm;
+    if (!llm.providerConfigs[providerId]) llm.providerConfigs[providerId] = {};
+    const config = llm.providerConfigs[providerId];
+
+    for (const field of schema) {
+      const setting = new Setting(containerEl).setName(field.label);
+      if (field.description) setting.setDesc(field.description);
+
+      const current = config[field.key] ?? field.defaultValue ?? "";
+
+      if (field.type === "text" || field.type === "password") {
+        setting.addText((text) => {
+          if (field.placeholder) text.setPlaceholder(field.placeholder);
+          text.setValue(String(current)).onChange(async (value) => {
+            config[field.key] = value;
+            await this.plugin.saveSettings();
+          });
+          if (field.type === "password") {
+            text.inputEl.type = "password";
+          }
+        });
+      } else if (field.type === "number") {
+        setting.addText((text) => {
+          if (field.placeholder) text.setPlaceholder(field.placeholder);
+          text.inputEl.type = "number";
+          text.setValue(String(current)).onChange(async (value) => {
+            const parsed = parseFloat(value);
+            config[field.key] = Number.isFinite(parsed) ? parsed : field.defaultValue ?? 0;
+            await this.plugin.saveSettings();
+          });
+        });
+      } else if (field.type === "select") {
+        setting.addDropdown((dd) => {
+          for (const opt of field.options ?? []) dd.addOption(opt.value, opt.label);
+          dd.setValue(String(current)).onChange(async (value) => {
+            config[field.key] = value;
+            await this.plugin.saveSettings();
+          });
+        });
+      } else if (field.type === "toggle") {
+        setting.addToggle((tg) => {
+          tg.setValue(Boolean(current)).onChange(async (value) => {
+            config[field.key] = value;
+            await this.plugin.saveSettings();
+          });
+        });
+      }
     }
-    if (/\/chat\/completions?$/.test(url)) return url;
-    const base = url.endsWith("/v1") ? url : `${url}/v1`;
-    return `${base}/chat/completions`;
   }
 }

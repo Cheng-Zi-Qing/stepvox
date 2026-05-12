@@ -678,12 +678,22 @@ export class VoicePipeline {
     if (!this.providerDirty) return;
     this.providerDirty = false;
 
+    this.rebuildAsr();
+    this.rebuildTts();
+    this.rebuildLlm();
+    this.rebuildSearch();
+
+    this.orchestrator?.dispose();
+    this.orchestrator = new AgentOrchestrator({
+      provider: this.llm!,
+      toolExecutor: this.toolExecutor,
+      systemPromptBuilder: () => buildSystemPrompt(this.app, this.currentVaultSnapshot),
+    });
+  }
+
+  private rebuildAsr(): void {
     this.asr?.dispose();
-    this.tts?.dispose();
-    this.llm?.dispose();
-
     const s = this.settings;
-
     this.asr = new StepFunASR({
       endpoint: getASREndpoint(s.stepfun.region, s.stepfun.mode),
       apiKey: s.stepfun.apiKey,
@@ -691,7 +701,11 @@ export class VoicePipeline {
       language: s.asr.language,
       sampleRate: s.audio.sampleRate,
     });
+  }
 
+  private rebuildTts(): void {
+    this.tts?.dispose();
+    const s = this.settings;
     this.tts = new StepFunTTS({
       endpoint: getTTSEndpoint(s.stepfun.region, s.stepfun.mode),
       apiKey: s.stepfun.apiKey,
@@ -699,20 +713,19 @@ export class VoicePipeline {
       voice: s.tts.voice,
       speed: s.tts.speed,
     });
+  }
 
-    this.llm = createLLMProvider(s);
+  private rebuildLlm(): void {
+    this.llm?.dispose();
+    this.llm = createLLMProvider(this.settings);
+  }
 
+  private rebuildSearch(): void {
+    const s = this.settings;
     const searchProvider =
       s.search.provider === "tavily" ? new TavilyProvider(s.search.apiKey) :
       s.search.provider === "exa" ? new ExaProvider(s.search.apiKey) :
       null;
     this.toolExecutor.setSearchProvider(searchProvider);
-
-    this.orchestrator?.dispose();
-    this.orchestrator = new AgentOrchestrator({
-      provider: this.llm,
-      toolExecutor: this.toolExecutor,
-      systemPromptBuilder: () => buildSystemPrompt(this.app, this.currentVaultSnapshot),
-    });
   }
 }
