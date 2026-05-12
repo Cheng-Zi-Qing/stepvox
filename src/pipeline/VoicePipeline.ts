@@ -390,6 +390,7 @@ export class VoicePipeline {
   /** Run the agent orchestrator loop. Returns the raw response text. */
   private async runReasoning(text: string): Promise<string> {
     if (!this.orchestrator) {
+      debugLog("LLM", "no orchestrator configured — aborting reasoning");
       this.callbacks.onError("LLM not configured");
       return "";
     }
