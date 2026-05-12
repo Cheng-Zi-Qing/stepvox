@@ -5,7 +5,7 @@ import {
   DEFAULT_SAMPLE_RATE,
   STEPFUN_VOICES_ENDPOINT,
 } from "./constants";
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, Modal, Notice, PluginSettingTab, Setting } from "obsidian";
 import type StepVoxPlugin from "./main";
 import { LLM_PROVIDERS, getLLMProviderEntry } from "./providers/llm/registry";
 import type { ConfigField } from "./providers/llm/registry";
@@ -524,34 +524,134 @@ export class StepVoxSettingTab extends PluginSettingTab {
    * block's default at render time, so the "Reset" button just writes "".
    */
   private renderEditablePromptBlocks(containerEl: HTMLElement): void {
-    const editable = PROMPT_BLOCKS.filter((b): b is PromptBlock & { storageKey: keyof StepVoxSettings["prompt"]; default: string } =>
-      b.editable === true && !!b.storageKey
+    const editable = PROMPT_BLOCKS.filter(
+      (b): b is PromptBlock & { storageKey: keyof StepVoxSettings["prompt"]; default: string } =>
+        b.editable === true && !!b.storageKey
     );
     for (const block of editable) {
       const key = block.storageKey;
       const current = this.plugin.settings.prompt[key] ?? "";
+      const isCustom = current.trim().length > 0;
+      const previewSource = isCustom ? current : block.default ?? "";
+      const preview = previewSource.replace(/\s+/g, " ").trim();
+      const truncated = preview.length > 80 ? preview.slice(0, 80) + "…" : preview;
+      const status = isCustom ? "Customised" : "Default";
+
       const setting = new Setting(containerEl)
         .setName(block.label ?? block.id)
-        .setDesc(`Leave blank to use the default. Default:\n${block.default ?? ""}`);
-
-      setting.addTextArea((ta) => {
-        ta.setPlaceholder(block.default ?? "")
-          .setValue(current)
-          .onChange(async (value) => {
-            this.plugin.settings.prompt[key] = value;
-            await this.plugin.saveSettings();
-          });
-        ta.inputEl.rows = 4;
-        ta.inputEl.style.width = "100%";
-      });
+        .setDesc(`${status} — ${truncated}`);
 
       setting.addButton((btn) =>
-        btn.setButtonText("Reset").onClick(async () => {
-          this.plugin.settings.prompt[key] = "";
-          await this.plugin.saveSettings();
-          this.display();
+        btn.setButtonText("Edit").onClick(() => {
+          new PromptBlockEditModal(
+            this.app,
+            block.label ?? block.id,
+            block.default ?? "",
+            current,
+            async (next) => {
+              this.plugin.settings.prompt[key] = next;
+              await this.plugin.saveSettings();
+              this.display();
+            }
+          ).open();
         })
       );
+
+      if (isCustom) {
+        setting.addExtraButton((btn) =>
+          btn
+            .setIcon("rotate-ccw")
+            .setTooltip("Reset to default")
+            .onClick(async () => {
+              this.plugin.settings.prompt[key] = "";
+              await this.plugin.saveSettings();
+              this.display();
+            })
+        );
+      }
     }
+  }
+}
+
+/**
+ * Modal editor for a single prompt block (D61). Shows the default value
+ * for reference and a large textarea for the user's override. Save writes
+ * the new value via the supplied callback; Reset writes empty (which
+ * means "use default" at render time); Cancel discards edits.
+ */
+class PromptBlockEditModal extends Modal {
+  private label: string;
+  private defaultText: string;
+  private currentText: string;
+  private onSave: (value: string) => Promise<void> | void;
+
+  constructor(
+    app: App,
+    label: string,
+    defaultText: string,
+    currentText: string,
+    onSave: (value: string) => Promise<void> | void
+  ) {
+    super(app);
+    this.label = label;
+    this.defaultText = defaultText;
+    this.currentText = currentText;
+    this.onSave = onSave;
+  }
+
+  onOpen(): void {
+    const { contentEl, modalEl } = this;
+    modalEl.style.width = "min(720px, 90vw)";
+    contentEl.empty();
+
+    contentEl.createEl("h2", { text: `Edit ${this.label}` });
+    contentEl.createEl("p", {
+      text: "Leave the editor empty to fall back to the default shown below.",
+      cls: "setting-item-description",
+    });
+
+    const defaultBox = contentEl.createEl("details");
+    defaultBox.createEl("summary", { text: "Show default" });
+    const defaultPre = defaultBox.createEl("pre");
+    defaultPre.style.whiteSpace = "pre-wrap";
+    defaultPre.style.background = "var(--background-secondary)";
+    defaultPre.style.padding = "8px 12px";
+    defaultPre.style.borderRadius = "6px";
+    defaultPre.style.fontSize = "0.85em";
+    defaultPre.setText(this.defaultText || "(no default)");
+
+    const textarea = contentEl.createEl("textarea");
+    textarea.value = this.currentText;
+    textarea.placeholder = this.defaultText;
+    textarea.rows = 12;
+    textarea.style.width = "100%";
+    textarea.style.marginTop = "12px";
+    textarea.style.fontFamily = "var(--font-monospace)";
+    textarea.style.fontSize = "0.9em";
+
+    const buttonRow = contentEl.createDiv();
+    buttonRow.style.display = "flex";
+    buttonRow.style.justifyContent = "flex-end";
+    buttonRow.style.gap = "8px";
+    buttonRow.style.marginTop = "16px";
+
+    const cancelBtn = buttonRow.createEl("button", { text: "Cancel" });
+    cancelBtn.addEventListener("click", () => this.close());
+
+    const resetBtn = buttonRow.createEl("button", { text: "Reset to default" });
+    resetBtn.addEventListener("click", async () => {
+      await this.onSave("");
+      this.close();
+    });
+
+    const saveBtn = buttonRow.createEl("button", { text: "Save", cls: "mod-cta" });
+    saveBtn.addEventListener("click", async () => {
+      await this.onSave(textarea.value);
+      this.close();
+    });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
   }
 }
