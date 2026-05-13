@@ -1,4 +1,4 @@
-import { Plugin } from "obsidian";
+import { Notice, Plugin } from "obsidian";
 import { VIEW_TYPE_STEPVOX } from "./constants";
 import { DEFAULT_SETTINGS, StepVoxSettingTab, migrateSettings, SETTINGS_SCHEMA_VERSION } from "./settings";
 import type { StepVoxSettings } from "./settings";
@@ -7,12 +7,14 @@ import { StatusBarWidget } from "./ui/StatusBarWidget";
 import { VoicePipeline } from "./pipeline";
 import type { PipelineCallbacks } from "./pipeline";
 import { debugLog, initDebugLogger, maybeRotateLog, setDebugEnabled } from "./utils/debug-logger";
+import { LocalApiServer } from "./server/local-api";
 
 export default class StepVoxPlugin extends Plugin {
   settings!: StepVoxSettings;
   private statusBar!: StatusBarWidget;
   private pipeline!: VoicePipeline;
   private isRecording = false;
+  private localApi!: LocalApiServer;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -87,9 +89,19 @@ export default class StepVoxPlugin extends Plugin {
       name: "Toggle voice recording",
       callback: () => this.toggleRecording(),
     });
+
+    this.localApi = new LocalApiServer(
+      () => {
+        this.toggleRecording();
+        return this.isRecording;
+      },
+      { onStartError: (msg) => new Notice(msg) },
+    );
+    this.localApi.start();
   }
 
   onunload(): void {
+    this.localApi.stop();
     this.pipeline.dispose();
   }
 
