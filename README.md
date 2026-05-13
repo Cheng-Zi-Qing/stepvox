@@ -56,6 +56,7 @@ StepVox sends data to several third-party services to do its job. Below is a com
 | Your settings, including API keys | `<vault>/.obsidian/plugins/stepvox/data.json` | Persisted plugin config |
 | Debug log (only when Debug mode is on) | `<vault>/.obsidian/plugins/stepvox/debug.log` | Troubleshooting; off by default |
 | Conversation history | In-memory only | Not persisted across Obsidian restarts |
+| Local HTTP server (port 27120) | `127.0.0.1:27120` | Global hotkey endpoint; localhost only, no auth |
 
 **You should know:**
 
@@ -84,7 +85,27 @@ StepVox registers exactly two commands:
 
 Bind them via **Settings → Hotkeys**, search "StepVox".
 
-> **System-wide global hotkey?** Obsidian hotkeys only fire while Obsidian has focus. To trigger StepVox from any app, see [issue #1](https://github.com/Cheng-Zi-Qing/stepvox/issues/1) for OS-level recipes (Apple Shortcuts, Hammerspoon, Raycast, Advanced URI plugin, …).
+> **System-wide global hotkey?** Obsidian hotkeys only fire while Obsidian has focus. See [Global Hotkey (Local API)](#global-hotkey-local-api) below to trigger StepVox from any app.
+
+### Global Hotkey (Local API)
+
+StepVox runs a local HTTP server on `127.0.0.1:27120`. Send a `POST` request to toggle recording from any app:
+
+```bash
+curl -X POST http://localhost:27120/toggle
+# → {"recording":true}  or  {"recording":false}
+```
+
+Bind this to a system-wide shortcut with your launcher of choice:
+
+| Tool | Setup |
+|------|-------|
+| **Raycast** | Create a Script Command → `curl -s -X POST http://localhost:27120/toggle` |
+| **Alfred** | Workflow → Run Script → same `curl` command |
+| **Apple Shortcuts** | Add a "Run Shell Script" action → same `curl` command |
+| **Hammerspoon** | `hs.hotkey.bind({"cmd","shift"}, "v", function() hs.execute("curl -s -X POST http://localhost:27120/toggle") end)` |
+
+The server starts automatically with the plugin and binds to localhost only — not reachable from the network. If port `27120` is occupied by another process, the plugin shows a Notice and continues without the local API; all other features work normally.
 
 ### Verify your setup (optional)
 
@@ -177,6 +198,7 @@ StepVox 为了完成功能会把数据发送给若干第三方服务。下面是
 | 你的设置（含 API keys） | `<vault>/.obsidian/plugins/stepvox/data.json` | 持久化插件配置 |
 | 调试日志（仅当 Debug 模式开启时） | `<vault>/.obsidian/plugins/stepvox/debug.log` | 排错；默认关闭 |
 | 对话历史 | 仅内存中 | 不跨 Obsidian 重启保留 |
+| 本地 HTTP 服务（端口 27120） | `127.0.0.1:27120` | 全局快捷键端点；仅绑定 localhost，无鉴权 |
 
 **你应该知道：**
 
@@ -205,7 +227,27 @@ StepVox 只注册两个命令：
 
 绑定方式：**Settings → Hotkeys**，搜 "StepVox"。
 
-> **想要全局快捷键（在其他 app 里也能用）？** Obsidian 快捷键仅在 Obsidian 是前台时生效。跨 app 触发的方案见 [issue #1](https://github.com/Cheng-Zi-Qing/stepvox/issues/1)（涉及 Apple Shortcuts、Hammerspoon、Raycast、Advanced URI 插件等系统级方案）。
+> **想要全局快捷键（在其他 app 里也能用）？** Obsidian 快捷键仅在 Obsidian 是前台时生效。请看下方[全局快捷键（本地 API）](#全局快捷键本地-api)章节。
+
+### 全局快捷键（本地 API）
+
+StepVox 在 `127.0.0.1:27120` 运行一个本地 HTTP 服务。在任何 app 里发一个 `POST` 请求即可切换录音：
+
+```bash
+curl -X POST http://localhost:27120/toggle
+# → {"recording":true}  或  {"recording":false}
+```
+
+用你习惯的启动器绑定到系统级快捷键：
+
+| 工具 | 设置方式 |
+|------|---------|
+| **Raycast** | 新建 Script Command → `curl -s -X POST http://localhost:27120/toggle` |
+| **Alfred** | Workflow → Run Script → 同上 `curl` 命令 |
+| **Apple 快捷指令** | 添加「运行 Shell 脚本」操作 → 同上 `curl` 命令 |
+| **Hammerspoon** | `hs.hotkey.bind({"cmd","shift"}, "v", function() hs.execute("curl -s -X POST http://localhost:27120/toggle") end)` |
+
+服务随插件自动启动，仅绑定 localhost（外部网络不可达）。若端口 `27120` 被其他进程占用，插件会弹出 Notice 提示，不影响其他功能正常运行。
 
 ### 验证配置（可选）
 
