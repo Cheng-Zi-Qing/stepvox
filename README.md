@@ -21,7 +21,7 @@
 
 ### Requirements
 
-- Obsidian **≥ 1.7.0**, desktop only (the plugin uses Node WebSockets and is not supported on mobile).
+- Obsidian **≥ 1.7.0**, desktop only (the plugin uses Node.js APIs not available on mobile).
 - A **StepFun API key** for ASR (speech recognition) and TTS (speech synthesis). StepFun is currently the only provider for these two stages. Get your key at <https://platform.stepfun.com/step-plan> (China) or <https://platform.stepfun.ai/step-plan> (Global).
 - An **LLM API key** for at least one of: StepFun, OpenAI, Anthropic, or a custom OpenAI-compatible endpoint.
 - **Microphone permission** for Obsidian. macOS: System Settings → Privacy & Security → Microphone → enable Obsidian.
@@ -142,7 +142,7 @@ Issues and PRs welcome at <https://github.com/Cheng-Zi-Qing/stepvox/issues>.
 
 ### 使用前提
 
-- Obsidian **≥ 1.7.0**，仅桌面端（插件用了 Node WebSocket，移动端跑不动）。
+- Obsidian **≥ 1.7.0**，仅桌面端（插件使用了移动端不可用的 Node.js API）。
 - **StepFun API key**（用于 ASR 语音识别和 TTS 语音合成）。这两个阶段目前只支持 StepFun。国内版：<https://platform.stepfun.com/step-plan>；国际版：<https://platform.stepfun.ai/step-plan>。
 - 至少一个 **LLM provider** 的 API key：StepFun / OpenAI / Anthropic / 自定义 OpenAI 兼容端点 任选。
 - **Obsidian 麦克风权限**。macOS 在「系统设置 → 隐私与安全 → 麦克风」里勾选 Obsidian。
