@@ -368,6 +368,99 @@ describe("PhaseController", () => {
     expect(ctrl.getPhase()).toBe("listening");
     expect(d.calls.length).toBe(callsBefore);
   });
+
+  // ── #11 Cancel during listening — simplest baseline
+  it("cancel during listening → ends session immediately", async () => {
+    await ctrl.start(true);
+    expect(ctrl.getPhase()).toBe("listening");
+
+    ctrl.cancel();
+
+    expect(ctrl.getSessionAlive()).toBe(false);
+    expect(ctrl.getPhase()).toBe("idle");
+    expect(tearDownReasons(d)).toContain("user-cancel");
+  });
+
+  // ── #12 Cancel during thinking — reason() is in flight
+  //
+  // User cancels while the LLM is still computing. Even if reason() later
+  // resolves (simulating the orchestrator returning after its abort signal
+  // lands), no downstream delegate work (speak / emitResponse / onTurnComplete
+  // side-effects) should happen. The sessionAlive guard in runReasoning is
+  // what enforces this.
+  it("cancel during thinking → aborts cleanly, late reason() resolution drops everything", async () => {
+    await ctrl.start(true);
+    ctrl.onUserSpoke();
+
+    // Make reason() hang so we can cancel mid-flight
+    let reasonResolve: (v: string) => void;
+    d.reason = async (text: string) => {
+      d.calls.push({ method: "reason", args: [text] });
+      return new Promise<string>((resolve) => { reasonResolve = resolve; });
+    };
+
+    const transcriptPromise = ctrl.onTranscript("问题");
+    expect(ctrl.getPhase()).toBe("thinking");
+
+    ctrl.cancel();
+
+    // Session is dead immediately, before reason() resolves
+    expect(ctrl.getSessionAlive()).toBe(false);
+    expect(ctrl.getPhase()).toBe("idle");
+    expect(tearDownReasons(d)).toContain("user-cancel");
+
+    // Now let the stale reason() call finish (mimics orchestrator.abort
+    // throwing → VoicePipeline catches → returns "" → we reach this point)
+    reasonResolve!("stale response that should be ignored");
+    await transcriptPromise;
+
+    // Nothing downstream should have fired
+    expect(d.methodCalls("speak")).toHaveLength(0);
+    expect(d.methodCalls("emitResponse")).toHaveLength(0);
+    expect(d.methodCalls("emitPerformanceMetrics")).toHaveLength(0);
+    expect(d.methodCalls("waitForEchoCooldown")).toHaveLength(0);
+    expect(ctrl.getPhase()).toBe("idle");
+  });
+
+  // ── #13 Cancel during speaking — speak() is in flight
+  //
+  // User cancels while TTS is still playing. The speak() promise eventually
+  // resolves (e.g. AudioPlayer.stop() unblocks it); speakReply's sessionAlive
+  // check prevents emitPerformanceMetrics and onTurnComplete from running.
+  it("cancel during speaking → aborts cleanly, late speak() resolution drops turn completion", async () => {
+    await ctrl.start(true);
+    ctrl.onUserSpoke();
+
+    // Hang speak() — reason() resolves instantly with a real response
+    let speakResolve: () => void;
+    d.speak = async (text: string) => {
+      d.calls.push({ method: "speak", args: [text] });
+      return new Promise<void>((resolve) => { speakResolve = resolve; });
+    };
+
+    const transcriptPromise = ctrl.onTranscript("问题");
+    // Flush microtasks so runReasoning completes and speakReply enters "speaking"
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ctrl.getPhase()).toBe("speaking");
+
+    ctrl.cancel();
+
+    expect(ctrl.getSessionAlive()).toBe(false);
+    expect(ctrl.getPhase()).toBe("idle");
+    expect(tearDownReasons(d)).toContain("user-cancel");
+
+    speakResolve!();
+    await transcriptPromise;
+
+    // Turn completion should not have fired — no echo cooldown wait,
+    // no perf metrics emitted, no restart of listening.
+    expect(d.methodCalls("waitForEchoCooldown")).toHaveLength(0);
+    expect(d.methodCalls("emitPerformanceMetrics")).toHaveLength(0);
+    // armListening was called once at session start (for the first listening
+    // phase); no second call triggered by onTurnComplete after cancel.
+    expect(d.methodCalls("armListening")).toHaveLength(1);
+    expect(ctrl.getPhase()).toBe("idle");
+  });
 });
 
 // ── cleanForDisplay ─────────────────────────────────────────────────
