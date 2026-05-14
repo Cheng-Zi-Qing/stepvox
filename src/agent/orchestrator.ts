@@ -29,6 +29,35 @@ const APOLOGY_FALLBACKS = [
   "嗯……好像有点故障，麻烦再讲一次。",
 ];
 
+function estimateTokens(messages: LLMMessage[], tools: ToolDefinition[]): {
+  system: number;
+  history: number;
+  historyCount: number;
+  tools: number;
+  total: number;
+} {
+  let system = 0;
+  let history = 0;
+  let historyCount = 0;
+
+  for (const m of messages) {
+    const len = Math.ceil((m.content?.length ?? 0) / 3.5);
+    if (m.role === "system") {
+      system += len;
+    } else {
+      history += len;
+      historyCount++;
+    }
+  }
+
+  let toolTokens = 0;
+  for (const t of tools) {
+    toolTokens += Math.ceil(JSON.stringify(t).length / 3.5);
+  }
+
+  return { system, history, historyCount, tools: toolTokens, total: system + history + toolTokens };
+}
+
 function pickApology(): string {
   return APOLOGY_FALLBACKS[Math.floor(Math.random() * APOLOGY_FALLBACKS.length)];
 }
@@ -67,7 +96,7 @@ export class AgentOrchestrator {
     const tools = TOOL_DEFINITIONS;
 
     // ----- Round 1 -----
-    const r1 = await this.callLLM(messages, tools);
+    const r1 = await this.callLLM(messages, tools, "R1");
     if (this.interrupted) return "";
     if (r1.error) {
       return this.finalize(pickApology());
@@ -99,7 +128,7 @@ export class AgentOrchestrator {
     );
 
     // ----- Round 2 -----
-    const r2 = await this.callLLM(messages, tools);
+    const r2 = await this.callLLM(messages, tools, "R2");
     if (this.interrupted) return "";
     if (r2.error) {
       return this.finalize(pickApology());
@@ -169,7 +198,7 @@ export class AgentOrchestrator {
       ? "This is the final answer turn. You just repeated the same tool call you already made in round 1 — that usually means the user's request was ambiguous or the data you got back wasn't what they wanted. DO NOT output any tool call, XML tag, or JSON. Instead ask the user ONE short clarifying question to figure out what they actually want. Respond in the same language they spoke. Maximum 40 characters."
       : "This is the final answer turn. Do NOT output any tool call, XML tag, JSON, or function-call syntax. Do NOT ask for another tool. Produce a natural spoken summary for the user, using the tool results already in the conversation above. Respond in the same language the user spoke. Maximum 80 Chinese characters or 50 English words, at most three sentences. If you lack the information, say so briefly.";
     messages.push({ role: "system", content: r3Instruction });
-    const r3 = await this.callLLM(messages, []);
+    const r3 = await this.callLLM(messages, [], "R3");
     if (this.interrupted) return "";
     const final = !r3.error && r3.response!.content ? r3.response!.content : pickApology();
     return this.finalize(final);
@@ -209,10 +238,17 @@ export class AgentOrchestrator {
 
   private async callLLM(
     messages: LLMMessage[],
-    tools: ToolDefinition[]
+    tools: ToolDefinition[],
+    roundLabel?: string
   ): Promise<{ response?: { content: string | null; toolCalls: ToolCall[] }; error?: unknown }> {
     this.abortController = new AbortController();
     const signal = this.abortController.signal;
+
+    const est = estimateTokens(messages, tools);
+    debugLog(
+      "TOKENS",
+      `${roundLabel ?? "?"} system=${est.system} history=${est.history}(${est.historyCount}msg) tools=${est.tools} total=${est.total}`
+    );
 
     const timeoutId = setTimeout(() => {
       this.abortController?.abort();
