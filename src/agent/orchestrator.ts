@@ -62,6 +62,14 @@ function pickApology(): string {
   return APOLOGY_FALLBACKS[Math.floor(Math.random() * APOLOGY_FALLBACKS.length)];
 }
 
+function stripToolXML(text: string): string {
+  return text
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
+    .replace(/<function=[\s\S]*?<\/function>/g, "")
+    .replace(/<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>/g, "")
+    .trim();
+}
+
 export interface OrchestratorCallbacks {
   onPartial?: (text: string) => void;
   onToolStart?: (toolCalls: ToolCall[]) => void;
@@ -191,16 +199,19 @@ export class AgentOrchestrator {
     }
 
     // ----- Round 3: forced summary, no tools -----
-    // Some providers (observed on step-3.5-flash) still emit <tool_call>
-    // XML in content even when tools=[]. Prepend a terse instruction
-    // hammering home: prose only, use what's already in history, no markup.
     const r3Instruction = duplicateLoopDetected
-      ? "This is the final answer turn. You just repeated the same tool call you already made in round 1 — that usually means the user's request was ambiguous or the data you got back wasn't what they wanted. DO NOT output any tool call, XML tag, or JSON. Instead ask the user ONE short clarifying question to figure out what they actually want. Respond in the same language they spoke. Maximum 40 characters."
-      : "This is the final answer turn. Do NOT output any tool call, XML tag, JSON, or function-call syntax. Do NOT ask for another tool. Produce a natural spoken summary for the user, using the tool results already in the conversation above. Respond in the same language the user spoke. Maximum 80 Chinese characters or 50 English words, at most three sentences. If you lack the information, say so briefly.";
+      ? "用户的请求可能有歧义，用一句话向用户确认他们想要什么。"
+      : "用上面的工具结果，给用户一个简短的口语化总结，最多三句话。";
     messages.push({ role: "system", content: r3Instruction });
     const r3 = await this.callLLM(messages, [], "R3");
     if (this.interrupted) return "";
-    const final = !r3.error && r3.response!.content ? r3.response!.content : pickApology();
+
+    let final = r3.error ? "" : (r3.response!.content ?? "");
+    final = stripToolXML(final);
+    if (!final) {
+      debugLog("LLM", `R3 empty after strip (raw ${r3.response?.content?.length ?? 0} chars)`);
+      final = pickApology();
+    }
     return this.finalize(final);
   }
 

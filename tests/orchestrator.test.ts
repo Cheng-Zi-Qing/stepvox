@@ -276,4 +276,79 @@ describe("AgentOrchestrator — D46 3-round loop", () => {
       expect(result).toBe(short);
     });
   });
+
+  describe("R3 XML recovery — stripToolXML safety net", () => {
+    it("R3 returns pure tool-call XML → stripped to empty → falls back to apology", async () => {
+      const xmlOnly = '<tool_call>{"name":"web_search","arguments":{"query":"test"}}</tool_call>';
+      const { provider, calls } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "web_search", args: { query: "x" } }] },
+        { content: null, toolCalls: [{ id: "t2", name: "search", args: { query: "y" } }] },
+        { content: xmlOnly, toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("trigger R3 XML");
+
+      expect(calls.length).toBe(3);
+      expect(/抱歉|不好意思|糟糕|卡住|故障/.test(result)).toBe(true);
+    });
+
+    it("R3 returns XML mixed with prose → extracts the prose", async () => {
+      const mixed = '今年有两家公司上市。<tool_call>{"name":"search","arguments":{}}</tool_call>';
+      const { provider, calls } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "web_search", args: { query: "x" } }] },
+        { content: null, toolCalls: [{ id: "t2", name: "search", args: { query: "y" } }] },
+        { content: mixed, toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("trigger mixed");
+
+      expect(calls.length).toBe(3);
+      expect(result).toBe("今年有两家公司上市。");
+    });
+
+    it("R3 returns clean prose → passes through unchanged", async () => {
+      const clean = "智谱和月之暗面今年上市了。";
+      const { provider, calls } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "web_search", args: { query: "x" } }] },
+        { content: null, toolCalls: [{ id: "t2", name: "search", args: { query: "y" } }] },
+        { content: clean, toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("trigger clean");
+
+      expect(calls.length).toBe(3);
+      expect(result).toBe(clean);
+    });
+
+    it("R3 strips <function=...> variant XML", async () => {
+      const fnXml = '结果如下。<function=web_search>{"query":"test"}</function>';
+      const { provider } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "web_search", args: { query: "x" } }] },
+        { content: null, toolCalls: [{ id: "t2", name: "search", args: { query: "y" } }] },
+        { content: fnXml, toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("trigger fn xml");
+
+      expect(result).toBe("结果如下。");
+    });
+
+    it("R3 strips <|tool_call_begin|> variant XML", async () => {
+      const pipeXml = '回答：两家。<|tool_call_begin|>search<|tool_call_end|>';
+      const { provider } = scriptedProvider([
+        { content: null, toolCalls: [{ id: "t1", name: "web_search", args: { query: "x" } }] },
+        { content: null, toolCalls: [{ id: "t2", name: "search", args: { query: "y" } }] },
+        { content: pipeXml, toolCalls: [] },
+      ]);
+      const { executor } = fakeExecutor();
+      const orch = make(provider, executor);
+      const result = await orch.run("trigger pipe xml");
+
+      expect(result).toBe("回答：两家。");
+    });
+  });
 });
