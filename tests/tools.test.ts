@@ -18,6 +18,9 @@ describe("getToolLayer", () => {
     expect(getToolLayer("set_property")).toBe("write");
     expect(getToolLayer("open_file")).toBe("write");
     expect(getToolLayer("move_file")).toBe("write");
+    expect(getToolLayer("create_folder")).toBe("write");
+    expect(getToolLayer("delete_file")).toBe("write");
+    expect(getToolLayer("rename_file")).toBe("write");
   });
 
   it("classifies system tools correctly", () => {
@@ -34,8 +37,6 @@ describe("getToolLayer", () => {
   });
 
   it("returns undefined for unknown tools", () => {
-    expect(getToolLayer("delete_file")).toBeUndefined();
-    expect(getToolLayer("rename_file")).toBeUndefined();
     expect(getToolLayer("anything_unknown")).toBeUndefined();
   });
 });

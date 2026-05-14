@@ -43,6 +43,9 @@ import { updateContent } from "./write/update_content";
 import { setProperty } from "./write/set_property";
 import { openFile } from "./write/open_file";
 import { moveFile } from "./write/move_file";
+import { createFolder } from "./write/create_folder";
+import { deleteFile } from "./write/delete_file";
+import { renameFile } from "./write/rename_file";
 
 // === system layer ===
 import { readMemory } from "./system/read_memory";
@@ -64,6 +67,9 @@ export const TOOL_REGISTRY: readonly Tool[] = [
   setProperty,
   openFile,
   moveFile,
+  createFolder,
+  deleteFile,
+  renameFile,
   // system
   readMemory,
   updateMemory,
