@@ -138,8 +138,6 @@ export default class StepVoxPlugin extends Plugin {
     await this.saveData(this.settings);
     setDebugEnabled(this.settings.debug.enabled);
     this.pipeline.onSettingsChanged(this.settings);
-    // Sync UI state with settings
-    this.getView()?.setSessionMode(this.settings.interaction.enableSessionMode);
   }
 
   private toggleRecording(): void {
