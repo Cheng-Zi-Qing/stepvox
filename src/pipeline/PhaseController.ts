@@ -288,6 +288,9 @@ export class PhaseController {
     this.sessionMode = false;
     this.setPhase("idle");
     this.setSessionAlive(false);
+    if (reason !== "error") {
+      this.delegate.extractMemory();
+    }
     this.delegate.tearDown(reason);
   }
 }

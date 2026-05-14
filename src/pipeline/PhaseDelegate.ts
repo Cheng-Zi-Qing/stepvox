@@ -22,6 +22,8 @@ export interface PhaseDelegate {
 
   tearDown(reason: string): void;
 
+  extractMemory(): void;
+
   startASRPerf(): void;
   endASRPerf(): number;
   startLLMPerf(): void;

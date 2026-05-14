@@ -12,6 +12,7 @@ import { TavilyProvider, ExaProvider } from "../providers/search";
 import type { ASRProvider, TTSProvider, LLMProvider, ASRStreamSession } from "../providers";
 import { AgentOrchestrator } from "../agent/orchestrator";
 import { ToolExecutor } from "../agent/tool-executor";
+import { extractSessionMemory } from "../agent/memory-extractor";
 import { buildSystemPrompt } from "../agent/prompt";
 import { getASREndpoint, getTTSEndpoint } from "../utils/endpoint";
 import { PerformanceTracker } from "../utils/performance-stats";
@@ -304,6 +305,13 @@ export class VoicePipeline {
 
       tearDown: (reason: string) => {
         this.tearDownAudio();
+      },
+
+      extractMemory: () => {
+        if (!this.orchestrator || !this.llm) return;
+        const history = this.orchestrator.getHistory();
+        if (history.length < 2) return;
+        void extractSessionMemory(history, this.llm, this.toolExecutor);
       },
 
       startASRPerf: () => {

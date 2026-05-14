@@ -24,6 +24,7 @@ type CallEntry =
   | { method: "armBargeInDetection"; args: ["watch" | "watch-speaking"] }
   | { method: "disarmBargeInDetection" }
   | { method: "tearDown"; args: [string] }
+  | { method: "extractMemory" }
   | { method: "startASRPerf" }
   | { method: "endASRPerf" }
   | { method: "startLLMPerf" }
@@ -63,6 +64,8 @@ class MockDelegate implements PhaseDelegate {
   disarmBargeInDetection() { this.record({ method: "disarmBargeInDetection" }); }
 
   tearDown(reason: string) { this.record({ method: "tearDown", args: [reason] }); }
+
+  extractMemory() { this.record({ method: "extractMemory" }); }
 
   startASRPerf() { this.record({ method: "startASRPerf" }); }
   endASRPerf(): number { this.record({ method: "endASRPerf" }); return 100; }
@@ -460,6 +463,35 @@ describe("PhaseController", () => {
     // phase); no second call triggered by onTurnComplete after cancel.
     expect(d.methodCalls("armListening")).toHaveLength(1);
     expect(ctrl.getPhase()).toBe("idle");
+  });
+
+  // ── #14 extractMemory called on normal session end, skipped on error
+  it("normal session end → extractMemory is called before tearDown", async () => {
+    await ctrl.start(false);
+    ctrl.onUserSpoke();
+    d.reasonResult = "ok";
+    await ctrl.onTranscript("hello");
+
+    const exCalls = d.methodCalls("extractMemory");
+    expect(exCalls).toHaveLength(1);
+    // verify extractMemory fires before tearDown
+    const order = d.calls.filter(c => c.method === "extractMemory" || c.method === "tearDown");
+    expect(order[0].method).toBe("extractMemory");
+    expect(order[1].method).toBe("tearDown");
+  });
+
+  it("error session end → extractMemory is NOT called", async () => {
+    await ctrl.start(false);
+    ctrl.onUserSpoke();
+    // Simulate error: listen phase throws → endSession("error")
+    await ctrl.onVad1IdleTimeout();
+
+    // No reason() should have been called (ASR error path)
+    expect(d.methodCalls("reason")).toHaveLength(0);
+    // tearDown should be called with "error"
+    expect(tearDownReasons(d)).toContain("error");
+    // extractMemory must not have been called
+    expect(d.methodCalls("extractMemory")).toHaveLength(0);
   });
 });
 

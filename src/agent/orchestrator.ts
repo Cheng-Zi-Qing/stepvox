@@ -11,7 +11,6 @@ const WEB_SEARCH_TIMEOUT_MS = 8_000;
 // D46: 3-round fan-out → converge → summarize
 const MAX_ROUNDS = 3;
 const SLOW_TOOL_THRESHOLD_MS = 3_000;
-const MEMORY_HINT_INTERVAL = 10;
 const MAX_HISTORY_MESSAGES = 40;
 
 // When R1 used a bulk-data tool (web_search / search) and R2 returned
@@ -189,6 +188,10 @@ export class AgentOrchestrator {
     this.roundCount = 0;
   }
 
+  getHistory(): readonly LLMMessage[] {
+    return this.history;
+  }
+
   dispose(): void {
     if (this.abortController) {
       this.abortController.abort();
@@ -309,15 +312,9 @@ export class AgentOrchestrator {
   }
 
   private buildMessages(): LLMMessage[] {
-    let systemPrompt = this.systemPromptBuilder();
-    // Surface the injected "now" so a stale system clock or mismatch is
-    // obvious in logs. Only logs the first ~80 chars to avoid spam.
+    const systemPrompt = this.systemPromptBuilder();
     const dateMatch = systemPrompt.match(/Today's date:\s*([^\n]+)/);
     if (dateMatch) debugLog("PROMPT", `injected date: ${dateMatch[1]}`);
-
-    if (this.roundCount % MEMORY_HINT_INTERVAL === 0 && this.roundCount > 0) {
-      systemPrompt += `\n\n## Memory Hint\nYou have interacted with the user for ${this.roundCount} rounds. If you have discovered user habits, preferences, or information worth remembering long-term, call update_memory to record them.`;
-    }
 
     return [{ role: "system", content: systemPrompt }, ...this.history];
   }
