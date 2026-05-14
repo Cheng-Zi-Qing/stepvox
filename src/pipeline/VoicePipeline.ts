@@ -13,6 +13,7 @@ import type { ASRProvider, TTSProvider, LLMProvider, ASRStreamSession } from "..
 import { AgentOrchestrator } from "../agent/orchestrator";
 import { ToolExecutor } from "../agent/tool-executor";
 import { extractSessionMemory } from "../agent/memory-extractor";
+import { migrateMemoryIfNeeded } from "../agent/memory-migration";
 import { buildSystemPrompt } from "../agent/prompt";
 import { getASREndpoint, getTTSEndpoint } from "../utils/endpoint";
 import { PerformanceTracker } from "../utils/performance-stats";
@@ -224,6 +225,7 @@ export class VoicePipeline {
       this.vad2.stop();
     }
 
+    await migrateMemoryIfNeeded(this.app, ".obsidian/plugins/stepvox");
     await this.controller.start(sessionMode);
   }
 
