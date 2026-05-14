@@ -330,7 +330,7 @@ export class StepVoxSettingTab extends PluginSettingTab {
       .setName("TTS model")
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("stepaudio-2.5-tts", "stepaudio-2.5-tts")
+          .addOption("stepaudio-2.5-tts", "stepaudio-2.5-tts (recommended)")
           .setValue(this.plugin.settings.tts.model)
           .onChange(async (value) => {
             this.plugin.settings.tts.model = value;

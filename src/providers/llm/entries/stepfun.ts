@@ -14,14 +14,14 @@ export const stepfunEntry: LLMProviderEntry = {
   configSchema: [
     {
       key: "stepfunMode",
-      label: "Billing mode",
+      label: "LLM billing mode",
       type: "select",
       options: [
         { value: "plan", label: "Coding Plan" },
         { value: "api", label: "API" },
       ],
       defaultValue: "plan",
-      description: "Billing mode for LLM calls. Independent of the ASR/TTS mode above.",
+      description: "Billing mode for LLM calls. Independent of the ASR/TTS billing mode.",
     },
     {
       key: "model",
