@@ -20,219 +20,727 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// src/agent/tools.ts
-function getToolLayer(name) {
-  return TOOL_LAYERS[name] ?? "dangerous";
+// src/agent/tools/_helpers.ts
+function resolveFile(app2, path) {
+  let resolved = path;
+  if (!resolved.endsWith(".md")) resolved += ".md";
+  const file = app2.vault.getAbstractFileByPath(resolved);
+  if (!(file instanceof import_obsidian.TFile)) {
+    throw new Error(`File not found: ${path}`);
+  }
+  return file;
 }
-var TOOL_DEFINITIONS, TOOL_LAYERS;
-var init_tools = __esm({
-  "src/agent/tools.ts"() {
+function findFrontmatterEnd(data) {
+  if (!data.startsWith("---")) return 0;
+  const end = data.indexOf("---", 3);
+  if (end === -1) return 0;
+  return end + 3 + (data[end + 3] === "\n" ? 1 : 0);
+}
+var import_obsidian;
+var init_helpers = __esm({
+  "src/agent/tools/_helpers.ts"() {
     "use strict";
-    TOOL_DEFINITIONS = [
-      {
-        name: "read_file",
-        description: "Read the content of a note in the vault",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path relative to vault root" }
-          },
-          required: ["path"]
-        }
+    import_obsidian = require("obsidian");
+  }
+});
+
+// src/agent/tools/read/read_file.ts
+var MAX_BYTES, readFile;
+var init_read_file = __esm({
+  "src/agent/tools/read/read_file.ts"() {
+    "use strict";
+    init_helpers();
+    MAX_BYTES = 4e3;
+    readFile = {
+      name: "read_file",
+      layer: "read",
+      description: "Read the full content of a note already in the user's Obsidian vault. Use when the user references a specific note they already have.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path relative to vault root" }
+        },
+        required: ["path"]
       },
-      {
-        name: "search",
-        description: "Full-text search across the vault",
-        parameters: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Search query" },
-            limit: { type: "number", description: "Max results (default 10)" }
-          },
-          required: ["query"]
+      async execute(args, ctx) {
+        const path = args.path;
+        const file = resolveFile(ctx.app, path);
+        const content = await ctx.app.vault.cachedRead(file);
+        if (content.length > MAX_BYTES) {
+          return content.slice(0, MAX_BYTES) + "\n...(truncated)";
         }
-      },
-      {
-        name: "list_files",
-        description: "List files in a directory",
-        parameters: {
-          type: "object",
-          properties: {
-            folder: { type: "string", description: "Folder path (default: vault root)" }
-          }
-        }
-      },
-      {
-        name: "get_properties",
-        description: "Get frontmatter properties of a note",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path relative to vault root" }
-          },
-          required: ["path"]
-        }
-      },
-      {
-        name: "create_file",
-        description: "Create a new note",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path to create" },
-            content: { type: "string", description: "File content" }
-          },
-          required: ["path", "content"]
-        }
-      },
-      {
-        name: "append",
-        description: "Append content to the end of a note",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path" },
-            content: { type: "string", description: "Content to append" }
-          },
-          required: ["path", "content"]
-        }
-      },
-      {
-        name: "prepend",
-        description: "Prepend content to the beginning of a note (after frontmatter)",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path" },
-            content: { type: "string", description: "Content to prepend" }
-          },
-          required: ["path", "content"]
-        }
-      },
-      {
-        name: "update_content",
-        description: "Find and replace text in a note. Use this when the user asks to change, replace, or modify specific text in a file.",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path (without .md extension)" },
-            old_text: { type: "string", description: "Exact text to find in the file" },
-            new_text: { type: "string", description: "Text to replace it with" }
-          },
-          required: ["path", "old_text", "new_text"]
-        }
-      },
-      {
-        name: "set_property",
-        description: "Set a frontmatter property on a note",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path" },
-            key: { type: "string", description: "Property name" },
-            value: { type: "string", description: "Property value" }
-          },
-          required: ["path", "key", "value"]
-        }
-      },
-      {
-        name: "open_file",
-        description: "Open a note in the editor",
-        parameters: {
-          type: "object",
-          properties: {
-            path: { type: "string", description: "File path" }
-          },
-          required: ["path"]
-        }
-      },
-      {
-        name: "web_search",
-        description: "Search the web for current information. Use when user asks about external content, recent events, or anything not in the vault.",
-        parameters: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Search query" }
-          },
-          required: ["query"]
-        }
-      },
-      {
-        name: "read_memory",
-        description: "Read long-term memory (user habits, preferences, project context)",
-        parameters: { type: "object", properties: {} }
-      },
-      {
-        name: "update_memory",
-        description: "Write to long-term memory. Use when you discover user habits or preferences worth remembering.",
-        parameters: {
-          type: "object",
-          properties: {
-            content: { type: "string", description: "Memory content to store" }
-          },
-          required: ["content"]
-        }
+        return content;
       }
-    ];
-    TOOL_LAYERS = {
-      read_file: "read",
-      search: "read",
-      list_files: "read",
-      get_properties: "read",
-      create_file: "write",
-      append: "write",
-      prepend: "write",
-      update_content: "write",
-      set_property: "write",
-      open_file: "write",
-      web_search: "read",
-      read_memory: "system",
-      update_memory: "system"
     };
   }
 });
 
-// src/agent/route.ts
-function routeTools(input) {
-  const matched = /* @__PURE__ */ new Set();
-  for (const kw of QUERY_KEYWORDS) {
-    if (input.includes(kw)) {
-      QUERY_TOOLS.forEach((t) => matched.add(t));
-      break;
-    }
+// src/agent/tools/read/search.ts
+var DEFAULT_LIMIT, search;
+var init_search = __esm({
+  "src/agent/tools/read/search.ts"() {
+    "use strict";
+    DEFAULT_LIMIT = 10;
+    search = {
+      name: "search",
+      layer: "read",
+      description: "Full-text search across the user's LOCAL Obsidian vault. Use for questions about the user's own notes, projects, tasks, or anything they've personally written down. Do NOT use for news, companies, current events, prices, or anything about the outside world \u2014 use web_search for those.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query" },
+          limit: { type: "number", description: "Max results (default 10)" }
+        },
+        required: ["query"]
+      },
+      async execute(args, ctx) {
+        const query = args.query;
+        const limit = args.limit ?? DEFAULT_LIMIT;
+        const files = ctx.app.vault.getMarkdownFiles();
+        const results = [];
+        const lower = query.toLowerCase();
+        for (const file of files) {
+          if (results.length >= limit) break;
+          const content = await ctx.app.vault.cachedRead(file);
+          const idx = content.toLowerCase().indexOf(lower);
+          if (idx !== -1) {
+            const start = Math.max(0, idx - 50);
+            const end = Math.min(content.length, idx + query.length + 50);
+            results.push({
+              path: file.path,
+              snippet: content.slice(start, end).replace(/\n/g, " ")
+            });
+          }
+        }
+        if (results.length === 0) return "No results found.";
+        return results.map((r) => `${r.path}: ...${r.snippet}...`).join("\n");
+      }
+    };
   }
-  for (const kw of MUTATE_KEYWORDS) {
-    if (input.includes(kw)) {
-      MUTATE_TOOLS.forEach((t) => matched.add(t));
-      break;
-    }
+});
+
+// src/agent/tools/read/list_files.ts
+var import_obsidian2, MAX_ENTRIES, listFiles;
+var init_list_files = __esm({
+  "src/agent/tools/read/list_files.ts"() {
+    "use strict";
+    import_obsidian2 = require("obsidian");
+    MAX_ENTRIES = 50;
+    listFiles = {
+      name: "list_files",
+      layer: "read",
+      description: "List files in a directory of the user's vault.",
+      parameters: {
+        type: "object",
+        properties: {
+          folder: { type: "string", description: "Folder path (default: vault root)" }
+        }
+      },
+      async execute(args, ctx) {
+        const folder = args.folder;
+        const abstract = folder ? ctx.app.vault.getAbstractFileByPath(folder) : ctx.app.vault.getRoot();
+        if (!abstract || !(abstract instanceof import_obsidian2.TFolder)) {
+          return `Folder not found: ${folder ?? "(root)"}`;
+        }
+        const entries = abstract.children.map((c) => c instanceof import_obsidian2.TFolder ? `${c.name}/` : c.name).sort();
+        if (entries.length === 0) return "(empty)";
+        if (entries.length <= MAX_ENTRIES) return entries.join("\n");
+        return entries.slice(0, MAX_ENTRIES).join("\n") + `
+...(+${entries.length - MAX_ENTRIES} more entries; ask the user to narrow down or use search)`;
+      }
+    };
   }
-  for (const kw of EXTERNAL_KEYWORDS) {
-    if (input.includes(kw)) {
-      EXTERNAL_TOOLS.forEach((t) => matched.add(t));
-      break;
-    }
+});
+
+// src/agent/tools/read/get_properties.ts
+var getProperties;
+var init_get_properties = __esm({
+  "src/agent/tools/read/get_properties.ts"() {
+    "use strict";
+    init_helpers();
+    getProperties = {
+      name: "get_properties",
+      layer: "read",
+      description: "Get frontmatter properties of a note in the vault.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path relative to vault root" }
+        },
+        required: ["path"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const file = resolveFile(ctx.app, path);
+        const cache = ctx.app.metadataCache.getFileCache(file);
+        const fm = cache?.frontmatter;
+        if (!fm) return "No frontmatter.";
+        return JSON.stringify(fm, null, 2);
+      }
+    };
   }
-  ALWAYS_TOOLS.forEach((t) => matched.add(t));
-  return TOOL_DEFINITIONS.filter((t) => matched.has(t.name));
+});
+
+// src/agent/tools/read/find_path.ts
+var import_obsidian3, MAX_MATCHES, findPath;
+var init_find_path = __esm({
+  "src/agent/tools/read/find_path.ts"() {
+    "use strict";
+    import_obsidian3 = require("obsidian");
+    MAX_MATCHES = 30;
+    findPath = {
+      name: "find_path",
+      layer: "read",
+      description: 'Fuzzy-find files and folders in the vault by name substring. Use this BEFORE create_file / move_file / read_file whenever the user refers to a place by a rough name ("the workspace folder", "my report", "\u5DE5\u4F5C\u76EE\u5F55") instead of giving you an exact path. Returns up to 30 paths prefixed with [file] or [folder]. Much cheaper than list_files for large vaults \u2014 one call usually resolves the ambiguity.',
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Substring to match against file/folder names and paths (case-insensitive)."
+          },
+          type: {
+            type: "string",
+            enum: ["file", "folder", "both"],
+            description: "Restrict results to a kind. Default: both."
+          }
+        },
+        required: ["query"]
+      },
+      async execute(args, ctx) {
+        const query = args.query;
+        const kind = args.type ?? "both";
+        const q = (query ?? "").trim().toLowerCase();
+        if (!q) return "find_path needs a non-empty query string.";
+        const all = ctx.app.vault.getAllLoadedFiles();
+        const matches = [];
+        for (const f of all) {
+          if (matches.length >= MAX_MATCHES + 1) break;
+          const isFolder = f instanceof import_obsidian3.TFolder;
+          if (kind === "file" && isFolder) continue;
+          if (kind === "folder" && !isFolder) continue;
+          if (!f.path) continue;
+          const name = (isFolder ? f.name : f.basename) ?? "";
+          if (name.toLowerCase().includes(q) || f.path.toLowerCase().includes(q)) {
+            matches.push({ type: isFolder ? "folder" : "file", path: f.path });
+          }
+        }
+        if (matches.length === 0) return `No paths found matching "${query}".`;
+        const shown = matches.slice(0, MAX_MATCHES);
+        const lines = shown.map((m) => `[${m.type}] ${m.path}`);
+        if (matches.length > MAX_MATCHES) lines.push(`...(+${matches.length - MAX_MATCHES} more, narrow the query)`);
+        return lines.join("\n");
+      }
+    };
+  }
+});
+
+// src/agent/tools/read/web_search.ts
+var webSearch;
+var init_web_search = __esm({
+  "src/agent/tools/read/web_search.ts"() {
+    "use strict";
+    webSearch = {
+      name: "web_search",
+      layer: "read",
+      description: `Search the live INTERNET for information. MUST call this for any question whose answer lives outside the user's personal vault: current events, news, company info, public people, product launches, prices, stocks, weather, releases, "what is X", "when did X happen", "who is X", anything with a year/date reference. Prefer this over vault search whenever the topic is about the outside world, even if the user didn't explicitly say "online" or "web". If you're unsure whether something lives in the vault or online, try web_search first \u2014 it's almost always right for factual world queries.`,
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query" }
+        },
+        required: ["query"]
+      },
+      async execute(args, ctx) {
+        const query = args.query;
+        if (!ctx.services.search) {
+          return "Web search not configured. Please add a search API key in settings.";
+        }
+        const results = await ctx.services.search.search(query);
+        if (results.length === 0) return "No results found.";
+        return results.map((r, i) => `[${i + 1}] ${r.title}
+${r.url}
+${r.content}`).join("\n\n---\n\n");
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/create_file.ts
+var createFile;
+var init_create_file = __esm({
+  "src/agent/tools/write/create_file.ts"() {
+    "use strict";
+    createFile = {
+      name: "create_file",
+      layer: "write",
+      description: "Create a new note in the vault.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path to create" },
+          content: { type: "string", description: "File content" }
+        },
+        required: ["path", "content"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const content = args.content;
+        let resolved = path;
+        if (!resolved.endsWith(".md")) resolved += ".md";
+        const existing = ctx.app.vault.getAbstractFileByPath(resolved);
+        if (existing) throw new Error(`File already exists: ${resolved}`);
+        await ctx.app.vault.create(resolved, content);
+        return `Created: ${resolved}`;
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/append.ts
+var append;
+var init_append = __esm({
+  "src/agent/tools/write/append.ts"() {
+    "use strict";
+    init_helpers();
+    append = {
+      name: "append",
+      layer: "write",
+      description: "Append content to the end of a note.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path" },
+          content: { type: "string", description: "Content to append" }
+        },
+        required: ["path", "content"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const content = args.content;
+        const file = resolveFile(ctx.app, path);
+        await ctx.app.vault.append(file, "\n" + content);
+        return `Appended to: ${file.path}`;
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/prepend.ts
+var prepend;
+var init_prepend = __esm({
+  "src/agent/tools/write/prepend.ts"() {
+    "use strict";
+    init_helpers();
+    prepend = {
+      name: "prepend",
+      layer: "write",
+      description: "Prepend content to the beginning of a note (after frontmatter).",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path" },
+          content: { type: "string", description: "Content to prepend" }
+        },
+        required: ["path", "content"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const content = args.content;
+        const file = resolveFile(ctx.app, path);
+        await ctx.app.vault.process(file, (data) => {
+          const fmEnd = findFrontmatterEnd(data);
+          return data.slice(0, fmEnd) + content + "\n" + data.slice(fmEnd);
+        });
+        return `Prepended to: ${file.path}`;
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/update_content.ts
+var updateContent;
+var init_update_content = __esm({
+  "src/agent/tools/write/update_content.ts"() {
+    "use strict";
+    init_helpers();
+    updateContent = {
+      name: "update_content",
+      layer: "write",
+      description: "Find and replace text in a note. Use when the user asks to change, replace, or modify specific text.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path (without .md extension)" },
+          old_text: { type: "string", description: "Exact text to find in the file" },
+          new_text: { type: "string", description: "Text to replace it with" }
+        },
+        required: ["path", "old_text", "new_text"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const oldText = args.old_text;
+        const newText = args.new_text;
+        const file = resolveFile(ctx.app, path);
+        let found = false;
+        await ctx.app.vault.process(file, (data) => {
+          if (!data.includes(oldText)) throw new Error("Text not found in file");
+          found = true;
+          return data.replace(oldText, newText);
+        });
+        return found ? `Updated: ${file.path}` : "Text not found.";
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/set_property.ts
+var setProperty;
+var init_set_property = __esm({
+  "src/agent/tools/write/set_property.ts"() {
+    "use strict";
+    init_helpers();
+    setProperty = {
+      name: "set_property",
+      layer: "write",
+      description: "Set a frontmatter property on a note.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path" },
+          key: { type: "string", description: "Property name" },
+          value: { type: "string", description: "Property value" }
+        },
+        required: ["path", "key", "value"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const key = args.key;
+        const value = args.value;
+        const file = resolveFile(ctx.app, path);
+        await ctx.app.fileManager.processFrontMatter(file, (fm) => {
+          fm[key] = value;
+        });
+        return `Set ${key}=${value} on ${file.path}`;
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/open_file.ts
+var openFile;
+var init_open_file = __esm({
+  "src/agent/tools/write/open_file.ts"() {
+    "use strict";
+    openFile = {
+      name: "open_file",
+      layer: "write",
+      description: "Open a note in the editor.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path" }
+        },
+        required: ["path"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        await ctx.app.workspace.openLinkText(path, "", false);
+        return `Opened: ${path}`;
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/move_file.ts
+var moveFile;
+var init_move_file = __esm({
+  "src/agent/tools/write/move_file.ts"() {
+    "use strict";
+    init_helpers();
+    moveFile = {
+      name: "move_file",
+      layer: "write",
+      description: "Move or rename a note within the vault. ALWAYS confirm the destination with the user in your response text BEFORE calling this the first time \u2014 if they haven't explicitly named a target path, ask them which folder to use. Fails if the destination path already exists.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Current file path." },
+          new_path: { type: "string", description: "Destination path (e.g. workspace/reports/foo.md)." }
+        },
+        required: ["path", "new_path"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const newPath = args.new_path;
+        if (!path || !newPath) throw new Error("move_file requires both 'path' and 'new_path'.");
+        const src = resolveFile(ctx.app, path);
+        let target = newPath;
+        if (!target.endsWith(".md") && !target.endsWith("/")) target += ".md";
+        if (ctx.app.vault.getAbstractFileByPath(target)) {
+          throw new Error(`Target already exists: ${target}. Use a different new_path.`);
+        }
+        await ctx.app.fileManager.renameFile(src, target);
+        return `Moved: ${src.path} \u2192 ${target}`;
+      }
+    };
+  }
+});
+
+// src/agent/memory-types.ts
+var EMPTY_STORE, MAX_MEMORY_ENTRIES;
+var init_memory_types = __esm({
+  "src/agent/memory-types.ts"() {
+    "use strict";
+    EMPTY_STORE = {
+      version: 1,
+      preferences: [],
+      facts: [],
+      interactions: []
+    };
+    MAX_MEMORY_ENTRIES = 30;
+  }
+});
+
+// src/agent/memory-helpers.ts
+function today() {
+  const d = /* @__PURE__ */ new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-var QUERY_KEYWORDS, MUTATE_KEYWORDS, EXTERNAL_KEYWORDS, QUERY_TOOLS, MUTATE_TOOLS, EXTERNAL_TOOLS, ALWAYS_TOOLS;
-var init_route = __esm({
-  "src/agent/route.ts"() {
+function formatMemoryForDisplay(store) {
+  if (!store) return "No memory stored yet.";
+  const { preferences, facts, interactions } = store;
+  if (preferences.length === 0 && facts.length === 0 && interactions.length === 0) {
+    return "No memory stored yet.";
+  }
+  const sections = ["## Your Memory"];
+  if (preferences.length > 0) {
+    sections.push("### Preferences");
+    for (const p of preferences) sections.push(`- ${p.key}: ${p.value} (${p.ts})`);
+  }
+  if (facts.length > 0) {
+    sections.push("### Facts");
+    for (const f of facts) sections.push(`- ${f.key}: ${f.value} (${f.ts})`);
+  }
+  if (interactions.length > 0) {
+    sections.push("### Recent Interactions");
+    for (const i of interactions) sections.push(`- ${i.summary} (${i.ts})`);
+  }
+  return sections.join("\n");
+}
+function applyMemoryAction(store, action) {
+  const result = structuredClone(store);
+  const ts = today();
+  if (action.action === "add") {
+    if (action.category === "interactions") {
+      result.interactions.push({ summary: action.summary, ts });
+    } else {
+      const arr = result[action.category];
+      const idx = arr.findIndex((e) => e.key === action.key);
+      if (idx >= 0) {
+        arr[idx] = { key: action.key, value: action.value, ts };
+      } else {
+        arr.push({ key: action.key, value: action.value, ts });
+      }
+    }
+    enforceCapFIFO(result);
+  } else {
+    if (action.category === "interactions") {
+      result.interactions = result.interactions.filter(
+        (e) => !e.summary.includes(action.summary)
+      );
+    } else {
+      const arr = result[action.category];
+      const idx = arr.findIndex((e) => e.key === action.key);
+      if (idx >= 0) arr.splice(idx, 1);
+    }
+  }
+  return result;
+}
+function enforceCapFIFO(store) {
+  let total = store.preferences.length + store.facts.length + store.interactions.length;
+  while (total > MAX_MEMORY_ENTRIES) {
+    if (store.interactions.length > 0) {
+      store.interactions.shift();
+    } else if (store.facts.length > 0) {
+      store.facts.shift();
+    } else {
+      break;
+    }
+    total--;
+  }
+}
+var init_memory_helpers = __esm({
+  "src/agent/memory-helpers.ts"() {
+    "use strict";
+    init_memory_types();
+  }
+});
+
+// src/agent/tools/system/read_memory.ts
+var import_obsidian4, readMemory;
+var init_read_memory = __esm({
+  "src/agent/tools/system/read_memory.ts"() {
+    "use strict";
+    import_obsidian4 = require("obsidian");
+    init_memory_helpers();
+    readMemory = {
+      name: "read_memory",
+      layer: "system",
+      description: "Read long-term memory (user habits, preferences, project context).",
+      parameters: { type: "object", properties: {} },
+      async execute(_args, ctx) {
+        const path = `${ctx.pluginDataDir}/memory/memory.json`;
+        const file = ctx.app.vault.getAbstractFileByPath(path);
+        if (!(file instanceof import_obsidian4.TFile)) return "No memory stored yet.";
+        try {
+          const raw = await ctx.app.vault.cachedRead(file);
+          const store = JSON.parse(raw);
+          return formatMemoryForDisplay(store);
+        } catch {
+          return "No memory stored yet.";
+        }
+      }
+    };
+  }
+});
+
+// src/agent/tools/system/update_memory.ts
+var import_obsidian5, updateMemory;
+var init_update_memory = __esm({
+  "src/agent/tools/system/update_memory.ts"() {
+    "use strict";
+    import_obsidian5 = require("obsidian");
+    init_memory_types();
+    init_memory_helpers();
+    updateMemory = {
+      name: "update_memory",
+      layer: "system",
+      description: "Add or remove structured long-term memory entries. Categories: preferences (user habits/corrections), facts (paths, names, recurring info), interactions (session summaries).",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["add", "remove"],
+            description: "Whether to add/upsert or remove an entry."
+          },
+          category: {
+            type: "string",
+            enum: ["preferences", "facts", "interactions"],
+            description: "Memory category."
+          },
+          key: {
+            type: "string",
+            description: "Identifier for preferences/facts entries."
+          },
+          value: {
+            type: "string",
+            description: "Content for preferences/facts entries."
+          },
+          summary: {
+            type: "string",
+            description: "Summary text for interactions entries."
+          }
+        },
+        required: ["action", "category"]
+      },
+      async execute(args, ctx) {
+        const path = `${ctx.pluginDataDir}/memory/memory.json`;
+        let store;
+        const file = ctx.app.vault.getAbstractFileByPath(path);
+        if (file instanceof import_obsidian5.TFile) {
+          try {
+            store = JSON.parse(await ctx.app.vault.cachedRead(file));
+          } catch {
+            store = structuredClone(EMPTY_STORE);
+          }
+        } else {
+          store = structuredClone(EMPTY_STORE);
+        }
+        const updated = applyMemoryAction(store, {
+          action: args.action,
+          category: args.category,
+          key: args.key,
+          value: args.value,
+          summary: args.summary
+        });
+        const json = JSON.stringify(updated, null, 2);
+        if (file instanceof import_obsidian5.TFile) {
+          await ctx.app.vault.modify(file, json);
+        } else {
+          await ctx.app.vault.create(path, json);
+        }
+        return "Memory updated.";
+      }
+    };
+  }
+});
+
+// src/agent/tools/index.ts
+function getToolByName(name) {
+  return TOOL_REGISTRY.find((t) => t.name === name);
+}
+var TOOL_REGISTRY;
+var init_tools = __esm({
+  "src/agent/tools/index.ts"() {
+    "use strict";
+    init_read_file();
+    init_search();
+    init_list_files();
+    init_get_properties();
+    init_find_path();
+    init_web_search();
+    init_create_file();
+    init_append();
+    init_prepend();
+    init_update_content();
+    init_set_property();
+    init_open_file();
+    init_move_file();
+    init_read_memory();
+    init_update_memory();
+    TOOL_REGISTRY = [
+      // read
+      readFile,
+      search,
+      listFiles,
+      getProperties,
+      findPath,
+      webSearch,
+      // write
+      createFile,
+      append,
+      prepend,
+      updateContent,
+      setProperty,
+      openFile,
+      moveFile,
+      // system
+      readMemory,
+      updateMemory
+    ];
+  }
+});
+
+// src/agent/tools.ts
+var TOOL_DEFINITIONS, getToolByName2;
+var init_tools2 = __esm({
+  "src/agent/tools.ts"() {
     "use strict";
     init_tools();
-    QUERY_KEYWORDS = ["\u8BFB", "\u770B", "\u67E5", "\u627E", "\u6709\u4EC0\u4E48", "\u54EA\u4E9B", "\u663E\u793A", "\u5217\u51FA", "\u5F53\u524D", "\u6253\u5F00", "\u662F\u4EC0\u4E48", "\u5185\u5BB9"];
-    MUTATE_KEYWORDS = ["\u5199", "\u5EFA", "\u521B\u5EFA", "\u6539", "\u66F4\u65B0", "\u52A0", "\u6DFB\u52A0", "\u8BB0", "\u4FEE\u6539", "\u5220", "\u79FB\u52A8", "\u91CD\u547D\u540D", "\u65B0\u5EFA"];
-    EXTERNAL_KEYWORDS = ["\u7F51\u4E0A", "\u641C\u4E00\u4E0B", "\u67E5\u4E00\u4E0B", "\u7F51\u7EDC", "\u4E92\u8054\u7F51", "\u4E0A\u7F51\u67E5", "\u7F51\u4E0A\u67E5"];
-    QUERY_TOOLS = /* @__PURE__ */ new Set(["read_file", "list_files", "search", "get_properties", "open_file"]);
-    MUTATE_TOOLS = /* @__PURE__ */ new Set(["create_file", "append", "prepend", "update_content", "set_property"]);
-    EXTERNAL_TOOLS = /* @__PURE__ */ new Set(["web_search"]);
-    ALWAYS_TOOLS = /* @__PURE__ */ new Set(["read_memory", "update_memory"]);
+    TOOL_DEFINITIONS = TOOL_REGISTRY.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters
+    }));
+    getToolByName2 = getToolByName;
   }
 });
 
 // src/utils/debug-logger.ts
 function debugLog(category, message, data) {
+  if (!enabled) return;
   const timestamp = (/* @__PURE__ */ new Date()).toISOString();
   const dataStr = data !== void 0 ? ` ${JSON.stringify(data)}` : "";
   const line = `[${timestamp}] [${category}] ${message}${dataStr}
@@ -252,12 +760,14 @@ function debugLog(category, message, data) {
     }
   });
 }
-var app, LOG_PATH, writeChain;
+var app, enabled, LOG_PATH, ROTATE_AFTER_MS, writeChain;
 var init_debug_logger = __esm({
   "src/utils/debug-logger.ts"() {
     "use strict";
     app = null;
+    enabled = false;
     LOG_PATH = ".obsidian/plugins/stepvox/debug.log";
+    ROTATE_AFTER_MS = 7 * 24 * 60 * 60 * 1e3;
     writeChain = Promise.resolve();
   }
 });
@@ -265,28 +775,54 @@ var init_debug_logger = __esm({
 // src/agent/orchestrator.ts
 var orchestrator_exports = {};
 __export(orchestrator_exports, {
-  AgentOrchestrator: () => AgentOrchestrator,
-  _internal: () => _internal
+  AgentOrchestrator: () => AgentOrchestrator
 });
+function estimateTokens(messages, tools) {
+  let system = 0;
+  let history = 0;
+  let historyCount = 0;
+  for (const m of messages) {
+    const len = Math.ceil((m.content?.length ?? 0) / 3.5);
+    if (m.role === "system") {
+      system += len;
+    } else {
+      history += len;
+      historyCount++;
+    }
+  }
+  let toolTokens = 0;
+  for (const t of tools) {
+    toolTokens += Math.ceil(JSON.stringify(t).length / 3.5);
+  }
+  return { system, history, historyCount, tools: toolTokens, total: system + history + toolTokens };
+}
 function pickApology() {
   return APOLOGY_FALLBACKS[Math.floor(Math.random() * APOLOGY_FALLBACKS.length)];
 }
-function summarizeResults(results) {
-  return results.map((r) => r.success ? `ok` : `fail: ${r.content}`);
+function callSignature(call) {
+  return `${call.name}|${JSON.stringify(call.args ?? {})}`;
 }
-var LLM_TIMEOUT_MS, TOOL_PHASE_TIMEOUT_MS, WEB_SEARCH_TIMEOUT_MS, MAX_ROUNDS, SLOW_TOOL_THRESHOLD_MS, MEMORY_HINT_INTERVAL, MAX_HISTORY_MESSAGES, APOLOGY_FALLBACKS, AgentOrchestrator, _internal;
+function partitionCalls(calls, alreadyCalled) {
+  const novelCalls = [];
+  const duplicateCalls = [];
+  for (const call of calls) {
+    if (alreadyCalled.has(callSignature(call))) duplicateCalls.push(call);
+    else novelCalls.push(call);
+  }
+  return { novelCalls, duplicateCalls };
+}
+var LLM_TIMEOUT_MS, TOOL_PHASE_TIMEOUT_MS, WEB_SEARCH_TIMEOUT_MS, SLOW_TOOL_THRESHOLD_MS, MAX_HISTORY_MESSAGES, LONG_ANSWER_CHAR_LIMIT, APOLOGY_FALLBACKS, AgentOrchestrator;
 var init_orchestrator = __esm({
   "src/agent/orchestrator.ts"() {
     "use strict";
-    init_route();
+    init_tools2();
     init_debug_logger();
     LLM_TIMEOUT_MS = 1e4;
     TOOL_PHASE_TIMEOUT_MS = 12e3;
     WEB_SEARCH_TIMEOUT_MS = 8e3;
-    MAX_ROUNDS = 3;
     SLOW_TOOL_THRESHOLD_MS = 3e3;
-    MEMORY_HINT_INTERVAL = 10;
-    MAX_HISTORY_MESSAGES = 20;
+    MAX_HISTORY_MESSAGES = 40;
+    LONG_ANSWER_CHAR_LIMIT = 80;
     APOLOGY_FALLBACKS = [
       "\u62B1\u6B49\uFF0C\u6211\u8FD9\u8FB9\u51FA\u4E86\u70B9\u5C0F\u95EE\u9898\uFF0C\u4F60\u80FD\u518D\u8BF4\u4E00\u904D\u5417\uFF1F",
       "\u4E0D\u597D\u610F\u601D\uFF0C\u521A\u624D\u6CA1\u5904\u7406\u597D\uFF0C\u53EF\u4EE5\u518D\u8BD5\u4E00\u6B21\u5417\uFF1F",
@@ -309,9 +845,8 @@ var init_orchestrator = __esm({
         this.roundCount++;
         this.history.push({ role: "user", content: userInput });
         const messages = this.buildMessages();
-        const tools = routeTools(userInput);
-        let actionsTaken = [];
-        const r1 = await this.callLLM(messages, tools);
+        const tools = TOOL_DEFINITIONS;
+        const r1 = await this.callLLM(messages, tools, "R1");
         if (this.interrupted) return "";
         if (r1.error) {
           return this.finalize(pickApology());
@@ -329,30 +864,58 @@ var init_orchestrator = __esm({
         const r1Results = await this.runToolPhase(r1.response.toolCalls, callbacks);
         if (this.interrupted) return "";
         this.pushToolResults(messages, r1Results);
-        actionsTaken.push(...summarizeResults(r1Results));
-        const r2 = await this.callLLM(messages, tools);
+        const r1Signatures = new Set(
+          r1.response.toolCalls.map((c) => callSignature(c))
+        );
+        const r2 = await this.callLLM(messages, tools, "R2");
         if (this.interrupted) return "";
         if (r2.error) {
-          return this.finalize(pickApology(), actionsTaken);
+          return this.finalize(pickApology());
         }
+        let duplicateLoopDetected = false;
         if (r2.response.toolCalls.length === 0) {
-          const final2 = r2.response.content ?? pickApology();
-          return this.finalize(final2, actionsTaken);
+          const r2Content = r2.response.content ?? "";
+          const usedBulkTool = r1.response.toolCalls.some(
+            (c) => c.name === "web_search" || c.name === "search"
+          );
+          const overSpokenLimit = r2Content.length > LONG_ANSWER_CHAR_LIMIT;
+          if (!(usedBulkTool && overSpokenLimit)) {
+            return this.finalize(r2Content || pickApology());
+          }
+          debugLog(
+            "LOOP",
+            `R2 over-long answer (${r2Content.length} chars) after bulk tool \u2014 forcing R3 summary`
+          );
+          messages.push({ role: "assistant", content: r2Content });
+        } else {
+          if (r2.response.content) callbacks?.onPartial?.(r2.response.content);
+          messages.push({
+            role: "assistant",
+            content: r2.response.content,
+            tool_calls: r2.response.toolCalls
+          });
+          const { novelCalls, duplicateCalls } = partitionCalls(r2.response.toolCalls, r1Signatures);
+          if (duplicateCalls.length > 0) {
+            duplicateLoopDetected = duplicateCalls.length === r2.response.toolCalls.length;
+            for (const dup of duplicateCalls) {
+              debugLog("LOOP", `R2 duplicate tool ${dup.name} ${JSON.stringify(dup.args ?? {})} \u2014 short-circuiting`);
+              messages.push({
+                role: "tool",
+                content: "This tool has already been called with the same arguments in this turn. The previous result is in the conversation above \u2014 use it instead of asking again.",
+                tool_call_id: dup.id
+              });
+            }
+          }
+          const r2Results = novelCalls.length > 0 ? await this.runToolPhase(novelCalls, callbacks) : [];
+          if (this.interrupted) return "";
+          this.pushToolResults(messages, r2Results);
         }
-        if (r2.response.content) callbacks?.onPartial?.(r2.response.content);
-        messages.push({
-          role: "assistant",
-          content: r2.response.content,
-          tool_calls: r2.response.toolCalls
-        });
-        const r2Results = await this.runToolPhase(r2.response.toolCalls, callbacks);
-        if (this.interrupted) return "";
-        this.pushToolResults(messages, r2Results);
-        actionsTaken.push(...summarizeResults(r2Results));
-        const r3 = await this.callLLM(messages, []);
+        const r3Instruction = duplicateLoopDetected ? "This is the final answer turn. You just repeated the same tool call you already made in round 1 \u2014 that usually means the user's request was ambiguous or the data you got back wasn't what they wanted. DO NOT output any tool call, XML tag, or JSON. Instead ask the user ONE short clarifying question to figure out what they actually want. Respond in the same language they spoke. Maximum 40 characters." : "This is the final answer turn. Do NOT output any tool call, XML tag, JSON, or function-call syntax. Do NOT ask for another tool. Produce a natural spoken summary for the user, using the tool results already in the conversation above. Respond in the same language the user spoke. Maximum 80 Chinese characters or 50 English words, at most three sentences. If you lack the information, say so briefly.";
+        messages.push({ role: "system", content: r3Instruction });
+        const r3 = await this.callLLM(messages, [], "R3");
         if (this.interrupted) return "";
         const final = !r3.error && r3.response.content ? r3.response.content : pickApology();
-        return this.finalize(final, actionsTaken);
+        return this.finalize(final);
       }
       abort() {
         this.interrupted = true;
@@ -365,6 +928,9 @@ var init_orchestrator = __esm({
         this.history = [];
         this.roundCount = 0;
       }
+      getHistory() {
+        return this.history;
+      }
       dispose() {
         if (this.abortController) {
           this.abortController.abort();
@@ -372,14 +938,19 @@ var init_orchestrator = __esm({
         this.history = [];
       }
       // ---------- internals ----------
-      finalize(finalContent, _actionsTaken = []) {
+      finalize(finalContent) {
         this.history.push({ role: "assistant", content: finalContent });
         this.trimHistory();
         return finalContent;
       }
-      async callLLM(messages, tools) {
+      async callLLM(messages, tools, roundLabel) {
         this.abortController = new AbortController();
         const signal = this.abortController.signal;
+        const est = estimateTokens(messages, tools);
+        debugLog(
+          "TOKENS",
+          `${roundLabel ?? "?"} system=${est.system} history=${est.history}(${est.historyCount}msg) tools=${est.tools} total=${est.total}`
+        );
         const timeoutId = setTimeout(() => {
           this.abortController?.abort();
         }, LLM_TIMEOUT_MS);
@@ -458,13 +1029,9 @@ var init_orchestrator = __esm({
         }
       }
       buildMessages() {
-        let systemPrompt = this.systemPromptBuilder();
-        if (this.roundCount % MEMORY_HINT_INTERVAL === 0 && this.roundCount > 0) {
-          systemPrompt += `
-
-## Memory Hint
-You have interacted with the user for ${this.roundCount} rounds. If you have discovered user habits, preferences, or information worth remembering long-term, call update_memory to record them.`;
-        }
+        const systemPrompt = this.systemPromptBuilder();
+        const dateMatch = systemPrompt.match(/Today's date:\s*([^\n]+)/);
+        if (dateMatch) debugLog("PROMPT", `injected date: ${dateMatch[1]}`);
         return [{ role: "system", content: systemPrompt }, ...this.history];
       }
       trimHistory() {
@@ -475,68 +1042,81 @@ You have interacted with the user for ${this.roundCount} rounds. If you have dis
         }
       }
     };
-    _internal = {
-      APOLOGY_FALLBACKS,
-      LLM_TIMEOUT_MS,
-      TOOL_PHASE_TIMEOUT_MS,
-      WEB_SEARCH_TIMEOUT_MS,
-      MAX_ROUNDS
-    };
   }
 });
 
-// src/agent/system-prompt.ts
-var system_prompt_exports = {};
-__export(system_prompt_exports, {
-  buildSystemPrompt: () => buildSystemPrompt
-});
-function buildSystemPrompt(app2) {
-  const vaultName = app2.vault.getName();
-  const activeFile = app2.workspace.getActiveFile();
-  let fileContext = "";
-  if (activeFile) {
-    fileContext = `- Active file: ${activeFile.path}
-`;
+// src/constants.ts
+var DEFAULT_ASR_MODEL, DEFAULT_TTS_MODEL, DEFAULT_TTS_VOICE, DEFAULT_SAMPLE_RATE;
+var init_constants = __esm({
+  "src/constants.ts"() {
+    "use strict";
+    DEFAULT_ASR_MODEL = "stepaudio-2.5-asr";
+    DEFAULT_TTS_MODEL = "stepaudio-2.5-tts";
+    DEFAULT_TTS_VOICE = "youyanvsheng";
+    DEFAULT_SAMPLE_RATE = 16e3;
   }
-  return `You are StepVox, a sharp and witty personal secretary living inside Obsidian.
+});
 
-## Your Capabilities
-- You can HEAR the user through speech recognition (ASR)
-- You can SPEAK to the user through text-to-speech (TTS)
-- You are a voice assistant with full audio input/output capabilities
-
-## Personality
-- Efficient: results first, no filler
-- Playful: light humor on errors or idle chat, never robotic
-- Respond in the same language the user speaks
-
-## Response Length (voice output \u2014 calibrate to intent)
-- Chit-chat, confirmation, simple acknowledgement \u2192 1 short sentence
-- Action complete (created file, updated property, etc.) \u2192 1 short sentence confirming what was done
-- Information retrieval (search results, file content, web research) \u2192 complete the information faithfully; do not truncate key facts, but still prefer plain spoken language over long lists
-- The user can interrupt you at any time (Session Mode) \u2014 write responses that are still useful if cut off partway
-
-## Behavior Rules
-- User has explicit action intent (create/modify/delete/record/append) \u2192 invoke tools
-- User asks to READ, VIEW, or CHECK any file/note content \u2192 MUST call read_file. Do NOT answer from context or memory \u2014 always fetch fresh content via tool.
-- User asks what files exist or what's in a folder \u2192 MUST call list_files. Do NOT use the directory listing in context.
-- User asks about the current/active file \u2192 use the "Active file" path from Current Context below directly. No tool call needed for identifying which file is active.
-- User asks to find or search notes \u2192 MUST call search.
-- User is discussing or asking general questions (not about vault content) \u2192 respond only, no tool calls
-- High-risk operations (delete/move/rename) \u2192 confirm in response first, execute next turn
-- Writing tasks (write doc, write note, write report, \u5199\u6587\u6863/\u5199\u7B14\u8BB0/\u5199\u62A5\u544A/\u8D77\u8349/\u64B0\u5199) \u2192 ask ONE clarifying question first before writing: what is the purpose, who is the audience, what format/length, or what key points to cover. Pick the most important unknown. Only one question per turn.
-- When uncertain about vault state: use read_file or search to gather info, then answer
-- **CRITICAL: When calling tools, you MUST include text content alongside tool_calls** (e.g., "\u597D\u7684\uFF0C\u6211\u6765\u5E2E\u4F60\u641C\u7D22", "\u8BA9\u6211\u67E5\u4E00\u4E0B\u6587\u4EF6\u5185\u5BB9", "\u6211\u6765\u521B\u5EFA\u8FD9\u4E2A\u6587\u4EF6"). This text will be spoken to the user immediately via TTS while the tool executes, providing instant feedback. NEVER return tool_calls without accompanying text.
-- Tools may fail or time out \u2014 when a tool result contains "Error:" or "Timeout:", tell the user in plain language what went wrong, and suggest a next step. Do not retry silently.
-- NEVER invent or assume file contents. Even if context shows file info, you MUST call the appropriate tool to get authoritative data.
-- IMPORTANT: Avoid markdown formatting in responses (no *, **, _, __, etc.) \u2014 your response will be read aloud by TTS. Use plain text only.
-
-## Current Context
-- Vault: ${vaultName}
-${fileContext}`;
+// src/utils/request-url-with-abort.ts
+function getRequestUrl() {
+  if (cachedRequestUrl !== void 0) return cachedRequestUrl;
+  try {
+    const mod = require("obsidian");
+    cachedRequestUrl = typeof mod?.requestUrl === "function" ? mod.requestUrl : null;
+  } catch {
+    cachedRequestUrl = null;
+  }
+  return cachedRequestUrl ?? null;
 }
-var init_system_prompt = __esm({
-  "src/agent/system-prompt.ts"() {
+async function requestUrlWithAbort(opts, signal) {
+  if (signal?.aborted) {
+    throw new DOMException("Request aborted", "AbortError");
+  }
+  const ru = getRequestUrl();
+  if (ru) {
+    return requestViaObsidian(ru, opts, signal);
+  }
+  return requestViaFetch(opts, signal);
+}
+async function requestViaObsidian(ru, opts, signal) {
+  if (!signal) {
+    const r = await ru({ ...opts, throw: false });
+    return { status: r.status, text: r.text, json: r.json };
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      reject(new DOMException("Request aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    ru({ ...opts, throw: false }).then((r) => {
+      signal.removeEventListener("abort", onAbort);
+      if (signal.aborted) return;
+      resolve({ status: r.status, text: r.text, json: r.json });
+    }).catch((err) => {
+      signal.removeEventListener("abort", onAbort);
+      if (signal.aborted) return;
+      reject(err);
+    });
+  });
+}
+async function requestViaFetch(opts, signal) {
+  const response = await fetch(opts.url, {
+    method: opts.method,
+    headers: opts.headers,
+    body: opts.body,
+    signal
+  });
+  const text = await response.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+  }
+  return { status: response.status, text, json };
+}
+var cachedRequestUrl;
+var init_request_url_with_abort = __esm({
+  "src/utils/request-url-with-abort.ts"() {
     "use strict";
   }
 });
@@ -546,6 +1126,7 @@ var OpenAIProvider;
 var init_openai = __esm({
   "src/providers/llm/openai.ts"() {
     "use strict";
+    init_request_url_with_abort();
     OpenAIProvider = class {
       constructor(endpoint, apiKey, model, temperature) {
         this.id = "openai-provider";
@@ -589,20 +1170,22 @@ var init_openai = __esm({
             }
           }));
         }
-        const response = await fetch(this.chatURL, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${this.config.apiKey}`,
-            "Content-Type": "application/json"
+        const response = await requestUrlWithAbort(
+          {
+            url: this.chatURL,
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${this.config.apiKey}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify(body)
           },
-          body: JSON.stringify(body),
-          signal: request.signal
-        });
-        if (!response.ok) {
-          const text = await response.text().catch(() => "");
-          throw new Error(`OpenAI API error (${response.status}): ${text}`);
+          request.signal
+        );
+        if (response.status < 200 || response.status >= 300) {
+          throw new Error(`OpenAI API error (${response.status}): ${response.text}`);
         }
-        const data = await response.json();
+        const data = response.json;
         const msg = data.choices?.[0]?.message;
         if (!msg) {
           throw new Error("LLM response missing message");
@@ -619,16 +1202,6 @@ var init_openai = __esm({
           toolCalls
         };
       }
-      async validate() {
-        try {
-          await this.chat({
-            messages: [{ role: "user", content: "hi" }]
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      }
       dispose() {
       }
       buildChatURL(endpoint) {
@@ -643,11 +1216,98 @@ var init_openai = __esm({
   }
 });
 
+// src/utils/endpoint.ts
+function getStepFunEndpoint(region, mode, service) {
+  const domain = region === "china" ? "stepfun.com" : "stepfun.ai";
+  const prefix = mode === "plan" ? "step_plan/" : "";
+  return `https://api.${domain}/${prefix}v1/${service}`;
+}
+function getChatEndpoint(region, mode) {
+  return getStepFunEndpoint(region, mode, "chat/completions");
+}
+var init_endpoint = __esm({
+  "src/utils/endpoint.ts"() {
+    "use strict";
+  }
+});
+
+// src/providers/llm/entries/stepfun.ts
+var stepfunEntry;
+var init_stepfun = __esm({
+  "src/providers/llm/entries/stepfun.ts"() {
+    "use strict";
+    init_openai();
+    init_endpoint();
+    stepfunEntry = {
+      id: "stepfun",
+      name: "StepFun",
+      configSchema: [
+        {
+          key: "stepfunMode",
+          label: "LLM billing mode",
+          type: "select",
+          options: [
+            { value: "plan", label: "Coding Plan" },
+            { value: "api", label: "API" }
+          ],
+          defaultValue: "plan",
+          description: "Billing mode for LLM calls. Independent of the ASR/TTS billing mode."
+        },
+        {
+          key: "model",
+          label: "Model",
+          type: "text",
+          defaultValue: "step-3.5-flash"
+        },
+        {
+          key: "temperature",
+          label: "Temperature",
+          type: "number",
+          defaultValue: 0.3
+        }
+      ],
+      create(config, globalCtx) {
+        const stepfunMode = config.stepfunMode ?? "plan";
+        const model = config.model ?? "step-3.5-flash";
+        const temperature = config.temperature ?? 0.3;
+        const endpoint = getChatEndpoint(globalCtx.stepfun.region, stepfunMode);
+        return new OpenAIProvider(endpoint, globalCtx.stepfun.apiKey, model, temperature);
+      }
+    };
+  }
+});
+
+// src/providers/llm/entries/openai.ts
+var OPENAI_ENDPOINT, openaiEntry;
+var init_openai2 = __esm({
+  "src/providers/llm/entries/openai.ts"() {
+    "use strict";
+    init_openai();
+    OPENAI_ENDPOINT = "https://api.openai.com/v1";
+    openaiEntry = {
+      id: "openai",
+      name: "OpenAI",
+      configSchema: [
+        { key: "apiKey", label: "API Key", type: "password", placeholder: "sk-..." },
+        { key: "model", label: "Model", type: "text", defaultValue: "gpt-4o-mini" },
+        { key: "temperature", label: "Temperature", type: "number", defaultValue: 0.3 }
+      ],
+      create(config) {
+        const apiKey = config.apiKey ?? "";
+        const model = config.model ?? "gpt-4o-mini";
+        const temperature = config.temperature ?? 0.3;
+        return new OpenAIProvider(OPENAI_ENDPOINT, apiKey, model, temperature);
+      }
+    };
+  }
+});
+
 // src/providers/llm/anthropic.ts
 var AnthropicProvider;
 var init_anthropic = __esm({
   "src/providers/llm/anthropic.ts"() {
     "use strict";
+    init_request_url_with_abort();
     AnthropicProvider = class {
       constructor(endpoint, apiKey, model, temperature) {
         this.id = "anthropic-provider";
@@ -682,21 +1342,23 @@ var init_anthropic = __esm({
             input_schema: t.parameters
           }));
         }
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": this.config.apiKey,
-            "anthropic-version": "2023-06-01"
+        const response = await requestUrlWithAbort(
+          {
+            url,
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": this.config.apiKey,
+              "anthropic-version": "2023-06-01"
+            },
+            body: JSON.stringify(body)
           },
-          body: JSON.stringify(body),
-          signal: request.signal
-        });
-        if (!response.ok) {
-          const text = await response.text().catch(() => "");
-          throw new Error(`Anthropic API error (${response.status}): ${text}`);
+          request.signal
+        );
+        if (response.status < 200 || response.status >= 300) {
+          throw new Error(`Anthropic API error (${response.status}): ${response.text}`);
         }
-        const data = await response.json();
+        const data = response.json;
         const textContent = data.content?.find((c) => c.type === "text")?.text ?? null;
         const toolUses = data.content?.filter((c) => c.type === "tool_use") ?? [];
         const toolCalls = toolUses.map((tu) => ({
@@ -709,34 +1371,431 @@ var init_anthropic = __esm({
           toolCalls
         };
       }
-      async validate() {
-        try {
-          await this.chat({
-            messages: [{ role: "user", content: "hi" }]
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      }
       dispose() {
       }
     };
   }
 });
 
-// src/utils/endpoint.ts
-function getStepFunEndpoint(region, mode, service) {
-  const domain = region === "china" ? "stepfun.com" : "stepfun.ai";
-  const prefix = mode === "plan" ? "step_plan/" : "";
-  return `https://api.${domain}/${prefix}v1/${service}`;
-}
-function getChatEndpoint(region, mode) {
-  return getStepFunEndpoint(region, mode, "chat/completions");
-}
-var init_endpoint = __esm({
-  "src/utils/endpoint.ts"() {
+// src/providers/llm/entries/anthropic.ts
+var ANTHROPIC_ENDPOINT, anthropicEntry;
+var init_anthropic2 = __esm({
+  "src/providers/llm/entries/anthropic.ts"() {
     "use strict";
+    init_anthropic();
+    ANTHROPIC_ENDPOINT = "https://api.anthropic.com";
+    anthropicEntry = {
+      id: "anthropic",
+      name: "Anthropic",
+      configSchema: [
+        { key: "apiKey", label: "API Key", type: "password", placeholder: "sk-ant-..." },
+        { key: "model", label: "Model", type: "text", defaultValue: "claude-3-5-sonnet-latest" },
+        { key: "temperature", label: "Temperature", type: "number", defaultValue: 0.3 }
+      ],
+      create(config) {
+        const apiKey = config.apiKey ?? "";
+        const model = config.model ?? "claude-3-5-sonnet-latest";
+        const temperature = config.temperature ?? 0.3;
+        return new AnthropicProvider(ANTHROPIC_ENDPOINT, apiKey, model, temperature);
+      }
+    };
+  }
+});
+
+// src/providers/llm/entries/custom.ts
+var customEntry;
+var init_custom = __esm({
+  "src/providers/llm/entries/custom.ts"() {
+    "use strict";
+    init_openai();
+    customEntry = {
+      id: "custom",
+      name: "Custom (OpenAI-compatible)",
+      configSchema: [
+        {
+          key: "endpoint",
+          label: "Endpoint",
+          type: "text",
+          placeholder: "http://localhost:11434/v1",
+          description: "OpenAI-compatible base URL. Examples: ollama (http://localhost:11434/v1), vLLM, LM Studio."
+        },
+        {
+          key: "apiKey",
+          label: "API Key",
+          type: "password",
+          description: "Leave blank for local services that don't validate."
+        },
+        { key: "model", label: "Model", type: "text", placeholder: "llama3.2" },
+        { key: "temperature", label: "Temperature", type: "number", defaultValue: 0.3 }
+      ],
+      create(config) {
+        const endpoint = config.endpoint ?? "";
+        const apiKey = config.apiKey ?? "";
+        const model = config.model ?? "";
+        const temperature = config.temperature ?? 0.3;
+        return new OpenAIProvider(endpoint, apiKey, model, temperature);
+      }
+    };
+  }
+});
+
+// src/providers/llm/registry.ts
+function getLLMProviderEntry(id) {
+  return LLM_PROVIDERS.find((p) => p.id === id);
+}
+var LLM_PROVIDERS;
+var init_registry = __esm({
+  "src/providers/llm/registry.ts"() {
+    "use strict";
+    init_stepfun();
+    init_openai2();
+    init_anthropic2();
+    init_custom();
+    LLM_PROVIDERS = [
+      stepfunEntry,
+      openaiEntry,
+      anthropicEntry,
+      customEntry
+    ];
+  }
+});
+
+// src/agent/prompt/blocks/identity.ts
+var DEFAULT_IDENTITY, identity;
+var init_identity = __esm({
+  "src/agent/prompt/blocks/identity.ts"() {
+    "use strict";
+    DEFAULT_IDENTITY = "You are StepVox, a sharp and witty personal secretary living inside Obsidian.";
+    identity = {
+      id: "identity",
+      editable: true,
+      label: "Identity",
+      storageKey: "identity",
+      default: DEFAULT_IDENTITY,
+      render(ctx) {
+        const user = ctx.settings.prompt.identity?.trim();
+        return user && user.length > 0 ? user : DEFAULT_IDENTITY;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/vocabulary.ts
+var vocabulary;
+var init_vocabulary = __esm({
+  "src/agent/prompt/blocks/vocabulary.ts"() {
+    "use strict";
+    vocabulary = {
+      id: "vocabulary",
+      editable: false,
+      render(ctx) {
+        const vaultName = ctx.app.vault.getName();
+        return `## Vocabulary
+Treat the following terms as interchangeable: "vault", "workspace", "work space", "work-space", "notebook", "knowledge base", "notes". They all refer to the single Obsidian vault the user is in right now ("${vaultName}"). Never ask which workspace \u2014 there is exactly one.`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/capabilities.ts
+var capabilities;
+var init_capabilities = __esm({
+  "src/agent/prompt/blocks/capabilities.ts"() {
+    "use strict";
+    capabilities = {
+      id: "capabilities",
+      editable: false,
+      render() {
+        return `## Capabilities
+- You HEAR the user through speech recognition (ASR).
+- You SPEAK to the user through text-to-speech (TTS).
+- You are a voice assistant with full audio I/O.`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/personality.ts
+var DEFAULT_TRAITS, personality;
+var init_personality = __esm({
+  "src/agent/prompt/blocks/personality.ts"() {
+    "use strict";
+    DEFAULT_TRAITS = `- Efficient: results first, no filler.
+- Playful: light humor on errors or idle chat, never robotic.`;
+    personality = {
+      id: "personality",
+      editable: true,
+      label: "Personality traits",
+      storageKey: "personalityTraits",
+      default: DEFAULT_TRAITS,
+      render(ctx) {
+        const user = ctx.settings.prompt.personalityTraits?.trim();
+        const body = user && user.length > 0 ? user : DEFAULT_TRAITS;
+        return `## Personality
+${body}`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/response_length.ts
+var responseLength;
+var init_response_length = __esm({
+  "src/agent/prompt/blocks/response_length.ts"() {
+    "use strict";
+    responseLength = {
+      id: "response-length",
+      editable: false,
+      render() {
+        return `## Response Length \u2014 this is VOICE OUTPUT, treat it as a phone call, not a webpage
+- HARD CEILING: 80 Chinese characters OR 50 English words OR 3 sentences per reply. Exceeding this is a failure, not a thoroughness bonus.
+- Chit-chat, confirmation, acknowledgement \u2192 one short sentence.
+- Action completed (file created, property updated, etc.) \u2192 one short sentence confirming what was done.
+- Information retrieval (search results, file content, web research) \u2192 SUMMARIZE, do not recite. Pick the single most important fact for the user's specific question and say it. NEVER paste raw search results, numbered lists, date/statistic dumps, or section headings. If there is more to say, end with a short offer such as "Want the details?" \u2014 do NOT dump the detail yourself.
+- If the user explicitly asks for more ("detail", "more", "elaborate", "expand") you MAY go up to ~200 characters, still as flowing speech, still no raw dumps.
+- The user can interrupt you at any time (Session Mode). Put the most important thing FIRST so an interruption does not lose the point.`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/behavior_rules.ts
+var behaviorRules;
+var init_behavior_rules = __esm({
+  "src/agent/prompt/blocks/behavior_rules.ts"() {
+    "use strict";
+    behaviorRules = {
+      id: "behavior-rules",
+      editable: false,
+      render() {
+        return `## Behavior Rules
+- User has explicit action intent (create / modify / delete / record / append) \u2192 invoke tools.
+- User asks to READ, VIEW, or CHECK any file/note content \u2192 MUST call read_file. Do NOT answer from context or memory \u2014 always fetch fresh content via tool.
+- User asks what files exist or what is in a folder \u2192 MUST call list_files. Do NOT rely on any directory listing in context.
+- User asks about the current/active file \u2192 use the "Active file" path from Current Context below directly. No tool call needed to identify which file is active.
+- High-risk operations (delete / move / rename) \u2192 confirm in the response first, execute only on the next turn.`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/locating.ts
+var locating;
+var init_locating = __esm({
+  "src/agent/prompt/blocks/locating.ts"() {
+    "use strict";
+    locating = {
+      id: "locating",
+      editable: false,
+      render() {
+        return `## Locating Things in the Vault \u2014 READ THIS
+The "Vault Structure" block below lists the top two levels of folders. Consult it BEFORE calling any tool that takes a path.
+- If the user names a folder roughly ("workspace", "my reports folder", "projects") \u2192 match it against the Vault Structure first. If you see the folder there, use it directly. No exploration needed.
+- If you still cannot pinpoint the path (looking for a specific file, a deeply-nested folder, or an ambiguous name) \u2192 call \`find_path\` with a substring query. ONE call usually resolves it.
+- Do NOT chain \`list_files\` calls trying to map out the vault \u2014 that was the old, wrong pattern. Use the snapshot below and \`find_path\` instead.
+- When you create a file with \`create_file\`, put it in a sensible location the user has mentioned. If they said "workspace" and the snapshot has a "workspace/" folder, the path must begin with "workspace/". Never dump files at the vault root unless the user explicitly asked for the root.`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/tool_choice.ts
+var toolChoice;
+var init_tool_choice = __esm({
+  "src/agent/prompt/blocks/tool_choice.ts"() {
+    "use strict";
+    toolChoice = {
+      id: "tool-choice",
+      editable: false,
+      render() {
+        return `## Tool Choice \u2014 Vault vs Web
+You have both \`search\` (the user's LOCAL Obsidian vault) and \`web_search\` (the live internet). Pick based on WHERE the answer actually lives.
+- Personal content \u2014 the user's own notes, projects, tasks, things they've written down \u2192 \`search\`.
+- The outside world \u2014 news, current events, companies, public figures, product releases, prices, stocks, weather, anything with a year/date reference, anything phrased "latest", "recent", "what is X", "who is X", "when did X happen" \u2192 \`web_search\`.
+- When unsure: if the topic is a factual real-world query (company, person, event, product, number), prefer \`web_search\`. If the topic is clearly personal ("my notes on X", "that meeting last week"), prefer \`search\`.
+- Never claim you searched online if \`web_search\` was not provided as a tool this turn \u2014 just say you cannot look it up online.`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/other_rules.ts
+var otherRules;
+var init_other_rules = __esm({
+  "src/agent/prompt/blocks/other_rules.ts"() {
+    "use strict";
+    otherRules = {
+      id: "other-rules",
+      editable: false,
+      render() {
+        return `## Other Rules
+- Always respond in the same language the user spoke. If the user mixes languages, match the dominant one.
+- General questions that do not need any tool \u2192 just respond, no tool calls.
+- Writing tasks (write doc / write note / write report / draft / compose) \u2192 ask ONE clarifying question first before writing: purpose, audience, format/length, or key points \u2014 pick the most important unknown. Only one question per turn.
+- When uncertain about vault state, use read_file or search to gather info, then answer.
+- CRITICAL \u2014 when calling tools, you MUST include short text content alongside tool_calls (e.g. "Let me check.", "I'll search for that."). That text is spoken immediately while the tool runs, giving instant feedback. NEVER return tool_calls without accompanying text.
+- Tools may fail or time out. If a tool result contains "Error:" or "Timeout:", tell the user in plain language what went wrong and suggest a next step. Do not retry silently.
+- NEVER invent or assume file contents. Even if context seems to show file info, you MUST call the appropriate tool for authoritative data.
+- IMPORTANT: avoid markdown formatting (no *, **, _, __, #, -, etc.) \u2014 the response will be read aloud by TTS. Use plain prose.`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/current_context.ts
+function formatToday() {
+  const d = /* @__PURE__ */ new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const weekdayEn = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()];
+  return `${yyyy}-${mm}-${dd} ${weekdayEn}`;
+}
+var currentContext;
+var init_current_context = __esm({
+  "src/agent/prompt/blocks/current_context.ts"() {
+    "use strict";
+    currentContext = {
+      id: "current-context",
+      editable: false,
+      render(ctx) {
+        const vaultName = ctx.app.vault.getName();
+        const activeFile = ctx.app.workspace.getActiveFile();
+        const fileLine = activeFile ? `
+- Active file: ${activeFile.path}` : "";
+        return `## Current Context
+- Today's date: ${formatToday()} \u2014 use this as the authoritative "now". When the user says "this year", "today", "recent", or "latest", resolve against this date, not your training cutoff.
+- Vault: ${vaultName}${fileLine}`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/blocks/vault_structure.ts
+var vaultStructure;
+var init_vault_structure = __esm({
+  "src/agent/prompt/blocks/vault_structure.ts"() {
+    "use strict";
+    vaultStructure = {
+      id: "vault-structure",
+      editable: false,
+      render(ctx) {
+        const snapshot = ctx.vaultSnapshot?.trim();
+        if (!snapshot) return "";
+        return `## Vault Structure (captured at session start, 2-level deep)
+${snapshot}`;
+      }
+    };
+  }
+});
+
+// src/agent/prompt/index.ts
+function buildSystemPrompt(app2, settings, vaultSnapshot) {
+  const ctx = { app: app2, settings, vaultSnapshot };
+  return PROMPT_BLOCKS.map((b) => b.render(ctx).trim()).filter((s) => s.length > 0).join("\n\n");
+}
+var PROMPT_BLOCKS;
+var init_prompt = __esm({
+  "src/agent/prompt/index.ts"() {
+    "use strict";
+    init_identity();
+    init_vocabulary();
+    init_capabilities();
+    init_personality();
+    init_response_length();
+    init_behavior_rules();
+    init_locating();
+    init_tool_choice();
+    init_other_rules();
+    init_current_context();
+    init_vault_structure();
+    PROMPT_BLOCKS = [
+      identity,
+      vocabulary,
+      capabilities,
+      personality,
+      responseLength,
+      behaviorRules,
+      locating,
+      toolChoice,
+      otherRules,
+      currentContext,
+      vaultStructure
+    ];
+  }
+});
+
+// src/settings.ts
+var import_obsidian7, SETTINGS_SCHEMA_VERSION, DEFAULT_SETTINGS;
+var init_settings = __esm({
+  "src/settings.ts"() {
+    "use strict";
+    init_constants();
+    import_obsidian7 = require("obsidian");
+    init_registry();
+    init_prompt();
+    SETTINGS_SCHEMA_VERSION = 2;
+    DEFAULT_SETTINGS = {
+      schemaVersion: SETTINGS_SCHEMA_VERSION,
+      stepfun: {
+        region: "china",
+        mode: "plan",
+        apiKey: ""
+      },
+      asr: {
+        provider: "stepfun",
+        model: DEFAULT_ASR_MODEL,
+        language: "zh"
+      },
+      tts: {
+        enabled: true,
+        provider: "stepfun",
+        model: DEFAULT_TTS_MODEL,
+        voice: DEFAULT_TTS_VOICE,
+        speed: 1
+      },
+      llm: {
+        activeProvider: "stepfun",
+        providerConfigs: {
+          stepfun: { stepfunMode: "plan", model: "step-3.5-flash", temperature: 0.3 }
+        }
+      },
+      interaction: {
+        enableSessionMode: false
+      },
+      audio: {
+        sampleRate: DEFAULT_SAMPLE_RATE,
+        noiseSuppression: true,
+        echoCancellation: true
+      },
+      search: {
+        provider: "none",
+        apiKey: ""
+      },
+      prompt: {
+        identity: "",
+        personalityTraits: ""
+      },
+      debug: {
+        enabled: false
+      }
+    };
+  }
+});
+
+// src/agent/system-prompt.ts
+var system_prompt_exports = {};
+__export(system_prompt_exports, {
+  buildSystemPrompt: () => buildSystemPrompt2
+});
+function buildSystemPrompt2(app2, vaultStructure2, settings = DEFAULT_SETTINGS) {
+  return buildSystemPrompt(app2, settings, vaultStructure2 ?? null);
+}
+var init_system_prompt = __esm({
+  "src/agent/system-prompt.ts"() {
+    "use strict";
+    init_settings();
+    init_prompt();
   }
 });
 
@@ -745,34 +1804,31 @@ var factory_exports = {};
 __export(factory_exports, {
   createLLMProvider: () => createLLMProvider
 });
+function buildGlobalCtx(settings) {
+  return {
+    stepfun: {
+      region: settings.stepfun.region,
+      mode: settings.stepfun.mode,
+      apiKey: settings.stepfun.apiKey
+    }
+  };
+}
 function createLLMProvider(settings) {
-  const { llm, stepfun } = settings;
-  switch (llm.provider) {
-    case "stepfun": {
-      const endpoint = getChatEndpoint(stepfun.region, llm.stepfunMode);
-      return new OpenAIProvider(endpoint, stepfun.apiKey, llm.model, llm.temperature);
-    }
-    case "openai": {
-      const endpoint = "https://api.openai.com/v1";
-      return new OpenAIProvider(endpoint, llm.apiKey, llm.model, llm.temperature);
-    }
-    case "anthropic": {
-      const endpoint = "https://api.anthropic.com";
-      return new AnthropicProvider(endpoint, llm.apiKey, llm.model, llm.temperature);
-    }
-    case "custom": {
-      return new OpenAIProvider(llm.endpoint, llm.apiKey, llm.model, llm.temperature);
-    }
-    default:
-      throw new Error(`Unknown LLM provider: ${llm.provider}`);
+  const activeId = settings.llm.activeProvider;
+  const entry = getLLMProviderEntry(activeId);
+  if (!entry) {
+    const known = LLM_PROVIDERS.map((p) => p.id).join(", ");
+    throw new Error(
+      `Unknown LLM provider: "${activeId}". Known: ${known}.`
+    );
   }
+  const config = settings.llm.providerConfigs[activeId] ?? {};
+  return entry.create(config, buildGlobalCtx(settings));
 }
 var init_factory = __esm({
   "src/providers/llm/factory.ts"() {
     "use strict";
-    init_openai();
-    init_anthropic();
-    init_endpoint();
+    init_registry();
   }
 });
 
@@ -782,18 +1838,18 @@ __export(search_exports, {
   ExaProvider: () => ExaProvider,
   TavilyProvider: () => TavilyProvider
 });
-var import_obsidian2, TavilyProvider, ExaProvider;
-var init_search = __esm({
+var import_obsidian8, TavilyProvider, ExaProvider;
+var init_search2 = __esm({
   "src/providers/search.ts"() {
     "use strict";
-    import_obsidian2 = require("obsidian");
+    import_obsidian8 = require("obsidian");
     TavilyProvider = class {
       constructor(apiKey) {
         this.apiKey = apiKey;
       }
       async search(query) {
         try {
-          const resp = await (0, import_obsidian2.requestUrl)({
+          const resp = await (0, import_obsidian8.requestUrl)({
             url: "https://api.tavily.com/search",
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -821,7 +1877,7 @@ var init_search = __esm({
       }
       async search(query) {
         try {
-          const resp = await (0, import_obsidian2.requestUrl)({
+          const resp = await (0, import_obsidian8.requestUrl)({
             url: "https://api.exa.ai/search",
             method: "POST",
             headers: {
@@ -857,198 +1913,77 @@ __export(runner_exports, {
 module.exports = __toCommonJS(runner_exports);
 
 // src/agent/tool-executor.ts
-var import_obsidian = require("obsidian");
-init_tools();
+init_tools2();
+
+// src/agent/vault-snapshot.ts
+var import_obsidian6 = require("obsidian");
+var PER_LEVEL_CAP = 30;
+function snapshotVaultStructure(app2) {
+  const root = app2.vault.getRoot();
+  const topFolders = root.children.filter((c) => c instanceof import_obsidian6.TFolder).sort((a, b) => a.name.localeCompare(b.name));
+  if (topFolders.length === 0) return "(vault has no subfolders)";
+  const lines = [];
+  const truncated = topFolders.slice(0, PER_LEVEL_CAP);
+  for (const folder of truncated) {
+    lines.push(`${folder.name}/`);
+    const subs = folder.children.filter((c) => c instanceof import_obsidian6.TFolder).sort((a, b) => a.name.localeCompare(b.name));
+    const subTruncated = subs.slice(0, PER_LEVEL_CAP);
+    for (const sub of subTruncated) {
+      lines.push(`  ${folder.name}/${sub.name}/`);
+    }
+    if (subs.length > PER_LEVEL_CAP) {
+      lines.push(`  ...(+${subs.length - PER_LEVEL_CAP} more subfolders)`);
+    }
+  }
+  if (topFolders.length > PER_LEVEL_CAP) {
+    lines.push(`...(+${topFolders.length - PER_LEVEL_CAP} more top-level folders)`);
+  }
+  return lines.join("\n");
+}
+
+// src/agent/tool-executor.ts
 var ToolExecutor = class {
-  constructor(app2, memoryDir) {
+  constructor(app2, pluginDataDir) {
     this.searchProvider = null;
     this.app = app2;
-    this.memoryDir = memoryDir;
+    this.pluginDataDir = pluginDataDir;
   }
   setSearchProvider(provider) {
     this.searchProvider = provider;
   }
   async execute(call) {
-    const layer = getToolLayer(call.name);
-    if (layer === "dangerous") {
+    const tool = getToolByName2(call.name);
+    if (!tool) {
       return {
         id: call.id,
-        content: `Rejected: "${call.name}" requires user confirmation. Ask the user first.`,
+        content: `Unknown tool: ${call.name}`,
         success: false
       };
     }
+    const ctx = {
+      app: this.app,
+      pluginDataDir: this.pluginDataDir,
+      activeFilePath: this.app.workspace.getActiveFile()?.path ?? null,
+      services: {
+        search: this.searchProvider
+      }
+    };
     try {
-      const content = await this.dispatch(call.name, call.args);
+      const content = await tool.execute(call.args, ctx);
       return { id: call.id, content, success: true };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { id: call.id, content: `Error: ${msg}`, success: false };
     }
   }
-  async dispatch(name, args) {
-    switch (name) {
-      case "read_file":
-        return this.readFile(args.path);
-      case "search":
-        return this.search(args.query, args.limit);
-      case "list_files":
-        return this.listFiles(args.folder);
-      case "get_properties":
-        return this.getProperties(args.path);
-      case "create_file":
-        return this.createFile(args.path, args.content);
-      case "append":
-        return this.appendFile(args.path, args.content);
-      case "prepend":
-        return this.prependFile(args.path, args.content);
-      case "update_content":
-        return this.updateContent(
-          args.path,
-          args.old_text,
-          args.new_text
-        );
-      case "set_property":
-        return this.setProperty(
-          args.path,
-          args.key,
-          args.value
-        );
-      case "open_file":
-        return this.openFile(args.path);
-      case "read_memory":
-        return this.readMemory();
-      case "update_memory":
-        return this.updateMemory(args.content);
-      case "web_search":
-        return this.webSearch(args.query);
-      default:
-        throw new Error(`Unknown tool: ${name}`);
-    }
-  }
-  resolveFile(path) {
-    let resolved = path;
-    if (!resolved.endsWith(".md")) resolved += ".md";
-    const file = this.app.vault.getAbstractFileByPath(resolved);
-    if (!(file instanceof import_obsidian.TFile)) {
-      throw new Error(`File not found: ${path}`);
-    }
-    return file;
-  }
-  async readFile(path) {
-    const file = this.resolveFile(path);
-    const content = await this.app.vault.cachedRead(file);
-    if (content.length > 4e3) {
-      return content.slice(0, 4e3) + "\n...(truncated)";
-    }
-    return content;
-  }
-  async search(query, limit) {
-    const max = limit ?? 10;
-    const files = this.app.vault.getMarkdownFiles();
-    const results = [];
-    const lower = query.toLowerCase();
-    for (const file of files) {
-      if (results.length >= max) break;
-      const content = await this.app.vault.cachedRead(file);
-      const idx = content.toLowerCase().indexOf(lower);
-      if (idx !== -1) {
-        const start = Math.max(0, idx - 50);
-        const end = Math.min(content.length, idx + query.length + 50);
-        results.push({
-          path: file.path,
-          snippet: content.slice(start, end).replace(/\n/g, " ")
-        });
-      }
-    }
-    if (results.length === 0) return "No results found.";
-    return results.map((r) => `${r.path}: ...${r.snippet}...`).join("\n");
-  }
-  listFiles(folder) {
-    const abstract = folder ? this.app.vault.getAbstractFileByPath(folder) : this.app.vault.getRoot();
-    if (!abstract || !(abstract instanceof import_obsidian.TFolder)) {
-      return Promise.resolve(`Folder not found: ${folder ?? "(root)"}`);
-    }
-    const entries = abstract.children.map((c) => c instanceof import_obsidian.TFolder ? `${c.name}/` : c.name).sort();
-    return Promise.resolve(entries.join("\n") || "(empty)");
-  }
-  getProperties(path) {
-    const file = this.resolveFile(path);
-    const cache = this.app.metadataCache.getFileCache(file);
-    const fm = cache?.frontmatter;
-    if (!fm) return Promise.resolve("No frontmatter.");
-    return Promise.resolve(JSON.stringify(fm, null, 2));
-  }
-  async createFile(path, content) {
-    let resolved = path;
-    if (!resolved.endsWith(".md")) resolved += ".md";
-    const existing = this.app.vault.getAbstractFileByPath(resolved);
-    if (existing) throw new Error(`File already exists: ${resolved}`);
-    await this.app.vault.create(resolved, content);
-    return `Created: ${resolved}`;
-  }
-  async appendFile(path, content) {
-    const file = this.resolveFile(path);
-    await this.app.vault.append(file, "\n" + content);
-    return `Appended to: ${file.path}`;
-  }
-  async prependFile(path, content) {
-    const file = this.resolveFile(path);
-    await this.app.vault.process(file, (data) => {
-      const fmEnd = this.findFrontmatterEnd(data);
-      return data.slice(0, fmEnd) + content + "\n" + data.slice(fmEnd);
-    });
-    return `Prepended to: ${file.path}`;
-  }
-  async updateContent(path, oldText, newText) {
-    const file = this.resolveFile(path);
-    let found = false;
-    await this.app.vault.process(file, (data) => {
-      if (!data.includes(oldText)) throw new Error("Text not found in file");
-      found = true;
-      return data.replace(oldText, newText);
-    });
-    return found ? `Updated: ${file.path}` : "Text not found.";
-  }
-  async setProperty(path, key, value) {
-    const file = this.resolveFile(path);
-    await this.app.fileManager.processFrontMatter(file, (fm) => {
-      fm[key] = value;
-    });
-    return `Set ${key}=${value} on ${file.path}`;
-  }
-  async openFile(path) {
-    await this.app.workspace.openLinkText(path, "", false);
-    return `Opened: ${path}`;
-  }
-  async readMemory() {
-    const path = `${this.memoryDir}/memory.md`;
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof import_obsidian.TFile)) return "No memory stored yet.";
-    return this.app.vault.cachedRead(file);
-  }
-  async updateMemory(content) {
-    const path = `${this.memoryDir}/memory.md`;
-    const file = this.app.vault.getAbstractFileByPath(path);
-    if (file instanceof import_obsidian.TFile) {
-      await this.app.vault.modify(file, content);
-    } else {
-      await this.app.vault.create(path, content);
-    }
-    return "Memory updated.";
-  }
-  findFrontmatterEnd(data) {
-    if (!data.startsWith("---")) return 0;
-    const end = data.indexOf("---", 3);
-    if (end === -1) return 0;
-    return end + 3 + (data[end + 3] === "\n" ? 1 : 0);
-  }
-  async webSearch(query) {
-    if (!this.searchProvider) return "Web search not configured. Please add a search API key in settings.";
-    const results = await this.searchProvider.search(query);
-    if (results.length === 0) return "No results found.";
-    return results.map((r, i) => `[${i + 1}] ${r.title}
-${r.url}
-${r.content}`).join("\n\n---\n\n");
+  /**
+   * Capture a 2-level folder snapshot of the vault for prompt injection (D52).
+   * Lives here for backwards compatibility with VoicePipeline's existing
+   * `toolExecutor.snapshotVaultStructure()` call site; the canonical helper
+   * is in `agent/vault-snapshot.ts`.
+   */
+  snapshotVaultStructure() {
+    return snapshotVaultStructure(this.app);
   }
 };
 
@@ -1085,6 +2020,26 @@ function expectResultNotEmpty(result) {
   return {
     pass: result.length > 0,
     detail: result.length > 0 ? `Got response (${result.length} chars)` : "Empty response"
+  };
+}
+function containsChinese(text) {
+  return /[一-鿿]/.test(text);
+}
+function expectLanguageMatch(partials, expectedLang) {
+  if (partials.length === 0) {
+    return { pass: true, detail: "No partials emitted (no tool calls, so no wait text)" };
+  }
+  const allText = partials.join(" ");
+  const hasChinese = containsChinese(allText);
+  if (expectedLang === "zh") {
+    return {
+      pass: hasChinese,
+      detail: hasChinese ? `Wait text is Chinese: "${allText.slice(0, 80)}"` : `Expected Chinese wait text but got English: "${allText.slice(0, 80)}"`
+    };
+  }
+  return {
+    pass: !hasChinese,
+    detail: !hasChinese ? `Wait text is English: "${allText.slice(0, 80)}"` : `Expected English wait text but got Chinese: "${allText.slice(0, 80)}"`
   };
 }
 
@@ -1233,7 +2188,7 @@ function buildCases() {
     },
     // === Permission Gate ===
     {
-      name: "P1: dangerous tool rejected",
+      name: "P1: hallucinated destructive tool rejected",
       setup: async (app2) => {
         await app2.vault.create(`${TEST_DIR}/protected.md`, "do not delete");
       },
@@ -1241,12 +2196,12 @@ function buildCases() {
       assert: async (result, app2, toolLog) => {
         const fileStillExists = await expectFileExists(app2, `${TEST_DIR}/protected.md`);
         if (!fileStillExists.pass) return fileStillExists;
-        const dangerousCalled = toolLog.some(
+        const destructiveCalled = toolLog.some(
           (c) => c.name === "delete_file" || c.name === "move_file"
         );
         return {
-          pass: !dangerousCalled,
-          detail: dangerousCalled ? "Dangerous tool was executed (should have been rejected)" : "Dangerous tool correctly rejected, file preserved"
+          pass: !destructiveCalled,
+          detail: destructiveCalled ? "Hallucinated destructive tool was executed (should have been rejected)" : "Hallucinated destructive tool correctly rejected, file preserved"
         };
       },
       teardown: async (app2) => {
@@ -1335,12 +2290,73 @@ function buildCases() {
     {
       name: "WS1: web_search triggered",
       input: "\u5E2E\u6211\u5728\u7F51\u4E0A\u67E5\u4E00\u4E0B Obsidian \u6700\u65B0\u7248\u672C",
-      assert: async (result, _app, toolLog) => {
+      assert: async (result, _app, toolLog, _partials) => {
         const called = toolLog.some((c) => c.name === "web_search");
         if (!called) {
           return { pass: false, detail: `web_search not called. Tools: [${toolLog.map((c) => c.name).join(", ")}]` };
         }
         return expectResultNotEmpty(result);
+      }
+    },
+    // === Language Consistency (English prompts + Chinese user) ===
+    {
+      name: "L1: Chinese input \u2192 Chinese wait text (tool call)",
+      setup: async (app2) => {
+        await app2.vault.create(`${TEST_DIR}/lang-test.md`, "# \u8BED\u8A00\u6D4B\u8BD5\n\u5185\u5BB9");
+      },
+      input: `\u8BFB\u4E00\u4E0B ${TEST_DIR}/lang-test \u7684\u5185\u5BB9`,
+      assert: async (result, _app, toolLog, partials) => {
+        const t = expectToolCalled(toolLog, "read_file");
+        if (!t.pass) return t;
+        return expectLanguageMatch(partials, "zh");
+      },
+      teardown: async (app2) => {
+        const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/lang-test.md`);
+        if (f) await app2.vault.delete(f);
+      }
+    },
+    {
+      name: "L2: Chinese input \u2192 Chinese final response",
+      input: "\u4F60\u597D\uFF0C\u4ECA\u5929\u5929\u6C14\u600E\u4E48\u6837",
+      assert: async (result, _app, _toolLog, _partials) => {
+        const hasChinese = containsChinese(result);
+        return {
+          pass: hasChinese,
+          detail: hasChinese ? `Response in Chinese: "${result.slice(0, 80)}"` : `Expected Chinese response but got: "${result.slice(0, 80)}"`
+        };
+      }
+    },
+    {
+      name: "L3: English input \u2192 English final response",
+      input: "Hello, how are you?",
+      assert: async (result, _app, _toolLog, _partials) => {
+        const hasChinese = containsChinese(result);
+        return {
+          pass: !hasChinese,
+          detail: !hasChinese ? `Response in English: "${result.slice(0, 80)}"` : `Expected English response but got: "${result.slice(0, 80)}"`
+        };
+      }
+    },
+    {
+      name: "L4: Chinese search \u2192 Chinese wait text + Chinese response",
+      setup: async (app2) => {
+        await app2.vault.create(`${TEST_DIR}/search-lang.md`, "\u9879\u76EE\u5468\u62A5\u5185\u5BB9 xyzlang456");
+      },
+      input: "\u641C\u7D22\u5305\u542B xyzlang456 \u7684\u7B14\u8BB0",
+      assert: async (result, _app, toolLog, partials) => {
+        const t = expectToolCalled(toolLog, "search");
+        if (!t.pass) return t;
+        const langCheck = expectLanguageMatch(partials, "zh");
+        if (!langCheck.pass) return langCheck;
+        const hasChinese = containsChinese(result);
+        return {
+          pass: hasChinese,
+          detail: hasChinese ? `Search response in Chinese: "${result.slice(0, 80)}"` : `Expected Chinese search response but got: "${result.slice(0, 80)}"`
+        };
+      },
+      teardown: async (app2) => {
+        const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/search-lang.md`);
+        if (f) await app2.vault.delete(f);
       }
     }
   ];
@@ -1387,10 +2403,15 @@ async function runIntegrationTests(app2) {
       const orchestrator = new AgentOrchestrator({
         provider: llmProvider,
         toolExecutor: executor,
-        systemPromptBuilder: () => buildSystemPrompt(app2)
+        systemPromptBuilder: () => buildSystemPrompt2(app2)
       });
-      const result = await orchestrator.run(tc.input);
-      const assertion = await tc.assert(result ?? "", app2, [...log]);
+      const partials = [];
+      const result = await orchestrator.run(tc.input, {
+        onPartial: (text) => {
+          partials.push(text);
+        }
+      });
+      const assertion = await tc.assert(result ?? "", app2, [...log], partials);
       results.push({
         name: tc.name,
         pass: assertion.pass,
@@ -1429,7 +2450,7 @@ async function runWebSearchTest(app2) {
   const settings = plugin.settings;
   console.log("[WSTest] search.provider:", settings.search?.provider, "| key:", settings.search?.apiKey ? "set" : "EMPTY");
   const { createLLMProvider: createLLMProvider2 } = await Promise.resolve().then(() => (init_factory(), factory_exports));
-  const { TavilyProvider: TavilyProvider2, ExaProvider: ExaProvider2 } = await Promise.resolve().then(() => (init_search(), search_exports));
+  const { TavilyProvider: TavilyProvider2, ExaProvider: ExaProvider2 } = await Promise.resolve().then(() => (init_search2(), search_exports));
   const llmProvider = createLLMProvider2(settings);
   const realExecutor = new ToolExecutor(app2, ".obsidian/plugins/stepvox/memory");
   const searchProvider = settings.search?.provider === "tavily" ? new TavilyProvider2(settings.search.apiKey) : settings.search?.provider === "exa" ? new ExaProvider2(settings.search.apiKey) : null;
@@ -1443,11 +2464,11 @@ async function runWebSearchTest(app2) {
     return origExecute(call);
   };
   const { AgentOrchestrator: AgentOrchestrator2 } = await Promise.resolve().then(() => (init_orchestrator(), orchestrator_exports));
-  const { buildSystemPrompt: buildSystemPrompt2 } = await Promise.resolve().then(() => (init_system_prompt(), system_prompt_exports));
+  const { buildSystemPrompt: buildSystemPrompt3 } = await Promise.resolve().then(() => (init_system_prompt(), system_prompt_exports));
   const orchestrator = new AgentOrchestrator2({
     provider: llmProvider,
     toolExecutor: realExecutor,
-    systemPromptBuilder: () => buildSystemPrompt2(app2)
+    systemPromptBuilder: () => buildSystemPrompt3(app2)
   });
   const input = "\u5E2E\u6211\u5728\u7F51\u4E0A\u641C\u7D22\u4E00\u4E0B Obsidian \u6700\u65B0\u7248\u672C\u53F7";
   console.log("[WSTest] input:", input);

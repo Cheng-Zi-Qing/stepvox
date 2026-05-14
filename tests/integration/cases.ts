@@ -8,6 +8,8 @@ import {
   expectFileContains,
   expectFileNotExists,
   expectResultNotEmpty,
+  expectLanguageMatch,
+  containsChinese,
 } from "./helpers";
 
 const TEST_DIR = "_stepvox_test";
@@ -268,7 +270,7 @@ export function buildCases(): TestCase[] {
     {
       name: "WS1: web_search triggered",
       input: "帮我在网上查一下 Obsidian 最新版本",
-      assert: async (result, _app, toolLog) => {
+      assert: async (result, _app, toolLog, _partials) => {
         const called = toolLog.some((c) => c.name === "web_search");
         if (!called) {
           return { pass: false, detail: `web_search not called. Tools: [${toolLog.map(c => c.name).join(", ")}]` };
@@ -276,6 +278,74 @@ export function buildCases(): TestCase[] {
         // D46: web_search now runs synchronously inside the tool phase
         // (8s per-tool timeout, 12s phase cap). Result lands in the same turn.
         return expectResultNotEmpty(result);
+      },
+    },
+
+    // === Language Consistency (English prompts + Chinese user) ===
+    {
+      name: "L1: Chinese input → Chinese wait text (tool call)",
+      setup: async (app) => {
+        await app.vault.create(`${TEST_DIR}/lang-test.md`, "# 语言测试\n内容");
+      },
+      input: `读一下 ${TEST_DIR}/lang-test 的内容`,
+      assert: async (result, _app, toolLog, partials) => {
+        const t = expectToolCalled(toolLog, "read_file");
+        if (!t.pass) return t;
+        return expectLanguageMatch(partials, "zh");
+      },
+      teardown: async (app) => {
+        const f = app.vault.getAbstractFileByPath(`${TEST_DIR}/lang-test.md`);
+        if (f) await app.vault.delete(f);
+      },
+    },
+    {
+      name: "L2: Chinese input → Chinese final response",
+      input: "你好，今天天气怎么样",
+      assert: async (result, _app, _toolLog, _partials) => {
+        const hasChinese = containsChinese(result);
+        return {
+          pass: hasChinese,
+          detail: hasChinese
+            ? `Response in Chinese: "${result.slice(0, 80)}"`
+            : `Expected Chinese response but got: "${result.slice(0, 80)}"`,
+        };
+      },
+    },
+    {
+      name: "L3: English input → English final response",
+      input: "Hello, how are you?",
+      assert: async (result, _app, _toolLog, _partials) => {
+        const hasChinese = containsChinese(result);
+        return {
+          pass: !hasChinese,
+          detail: !hasChinese
+            ? `Response in English: "${result.slice(0, 80)}"`
+            : `Expected English response but got: "${result.slice(0, 80)}"`,
+        };
+      },
+    },
+    {
+      name: "L4: Chinese search → Chinese wait text + Chinese response",
+      setup: async (app) => {
+        await app.vault.create(`${TEST_DIR}/search-lang.md`, "项目周报内容 xyzlang456");
+      },
+      input: "搜索包含 xyzlang456 的笔记",
+      assert: async (result, _app, toolLog, partials) => {
+        const t = expectToolCalled(toolLog, "search");
+        if (!t.pass) return t;
+        const langCheck = expectLanguageMatch(partials, "zh");
+        if (!langCheck.pass) return langCheck;
+        const hasChinese = containsChinese(result);
+        return {
+          pass: hasChinese,
+          detail: hasChinese
+            ? `Search response in Chinese: "${result.slice(0, 80)}"`
+            : `Expected Chinese search response but got: "${result.slice(0, 80)}"`,
+        };
+      },
+      teardown: async (app) => {
+        const f = app.vault.getAbstractFileByPath(`${TEST_DIR}/search-lang.md`);
+        if (f) await app.vault.delete(f);
       },
     },
   ];

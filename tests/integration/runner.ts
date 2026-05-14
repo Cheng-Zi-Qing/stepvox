@@ -72,8 +72,11 @@ export async function runIntegrationTests(app: App): Promise<RunResult[]> {
         systemPromptBuilder: () => buildSystemPrompt(app),
       });
 
-      const result = await orchestrator.run(tc.input);
-      const assertion = await tc.assert(result ?? "", app, [...log]);
+      const partials: string[] = [];
+      const result = await orchestrator.run(tc.input, {
+        onPartial: (text) => { partials.push(text); },
+      });
+      const assertion = await tc.assert(result ?? "", app, [...log], partials);
 
       results.push({
         name: tc.name,

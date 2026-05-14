@@ -5,7 +5,7 @@ export interface TestCase {
   name: string;
   setup?: (app: App) => Promise<void>;
   input: string;
-  assert: (result: string, app: App, toolLog: ToolCall[]) => Promise<TestResult>;
+  assert: (result: string, app: App, toolLog: ToolCall[], partials: string[]) => Promise<TestResult>;
   teardown?: (app: App) => Promise<void>;
 }
 
@@ -71,6 +71,33 @@ export function expectResultNotEmpty(result: string): TestResult {
   return {
     pass: result.length > 0,
     detail: result.length > 0 ? `Got response (${result.length} chars)` : "Empty response",
+  };
+}
+
+export function containsChinese(text: string): boolean {
+  return /[一-鿿]/.test(text);
+}
+
+export function expectLanguageMatch(partials: string[], expectedLang: "zh" | "en"): TestResult {
+  if (partials.length === 0) {
+    return { pass: true, detail: "No partials emitted (no tool calls, so no wait text)" };
+  }
+  const allText = partials.join(" ");
+  const hasChinese = containsChinese(allText);
+
+  if (expectedLang === "zh") {
+    return {
+      pass: hasChinese,
+      detail: hasChinese
+        ? `Wait text is Chinese: "${allText.slice(0, 80)}"`
+        : `Expected Chinese wait text but got English: "${allText.slice(0, 80)}"`,
+    };
+  }
+  return {
+    pass: !hasChinese,
+    detail: !hasChinese
+      ? `Wait text is English: "${allText.slice(0, 80)}"`
+      : `Expected English wait text but got Chinese: "${allText.slice(0, 80)}"`,
   };
 }
 
