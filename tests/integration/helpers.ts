@@ -110,3 +110,38 @@ export function expectResultContains(result: string, keyword: string): TestResul
       : `Response missing "${keyword}": ${result.slice(0, 200)}`,
   };
 }
+
+const TOOL_XML_PATTERNS = [
+  /<tool_call>[\s\S]*?<\/tool_call>/,
+  /<function=[\s\S]*?<\/function>/,
+  /<\|tool_call_begin\|>[\s\S]*?\|tool_call_end\|>/,
+];
+
+/** Assert the response does not contain raw tool-call XML. */
+export function expectNoToolXML(result: string): TestResult {
+  for (const pattern of TOOL_XML_PATTERNS) {
+    const match = result.match(pattern);
+    if (match) {
+      return {
+        pass: false,
+        detail: `Response contains tool XML: ${match[0].slice(0, 100)}`,
+      };
+    }
+  }
+  return {
+    pass: true,
+    detail: "No tool XML in response",
+  };
+}
+
+/** Assert the response is not an apology fallback. */
+export function expectNotApology(result: string): TestResult {
+  const apologyPatterns = ["抱歉", "不好意思", "糟糕", "卡住", "故障", "没能整理好"];
+  const isApology = apologyPatterns.some((p) => result.includes(p));
+  return {
+    pass: !isApology,
+    detail: isApology
+      ? `Response is a fallback apology: "${result.slice(0, 100)}"`
+      : `Response is substantive: "${result.slice(0, 100)}"`,
+  };
+}

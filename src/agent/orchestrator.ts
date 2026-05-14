@@ -200,8 +200,8 @@ export class AgentOrchestrator {
 
     // ----- Round 3: forced summary, no tools -----
     const r3Instruction = duplicateLoopDetected
-      ? "用户的请求可能有歧义，用一句话向用户确认他们想要什么。"
-      : "用上面的工具结果，给用户一个简短的口语化总结，最多三句话。";
+      ? "The user's request may be ambiguous. Ask one short clarifying question."
+      : "Summarize the tool results above for the user in a short, spoken-style reply. Three to five sentences.";
     messages.push({ role: "system", content: r3Instruction });
     const r3 = await this.callLLM(messages, [], "R3");
     if (this.interrupted) return "";

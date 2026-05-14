@@ -487,6 +487,96 @@ var init_move_file = __esm({
   }
 });
 
+// src/agent/tools/write/create_folder.ts
+var createFolder;
+var init_create_folder = __esm({
+  "src/agent/tools/write/create_folder.ts"() {
+    "use strict";
+    createFolder = {
+      name: "create_folder",
+      layer: "write",
+      description: "Create a new folder in the vault. Use when the user asks to organize notes into a new directory, or before create_file when the target folder does not exist yet. Succeeds silently if the folder already exists.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Folder path to create (e.g. 'projects/2026')" }
+        },
+        required: ["path"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const existing = ctx.app.vault.getAbstractFileByPath(path);
+        if (existing) return `Folder already exists: ${path}`;
+        await ctx.app.vault.createFolder(path);
+        return `Created folder: ${path}`;
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/delete_file.ts
+var deleteFile;
+var init_delete_file = __esm({
+  "src/agent/tools/write/delete_file.ts"() {
+    "use strict";
+    init_helpers();
+    deleteFile = {
+      name: "delete_file",
+      layer: "write",
+      description: "Move a note to the system trash (recoverable). Use when the user explicitly asks to delete or remove a note. The file is NOT permanently destroyed \u2014 it goes to the OS trash and can be restored.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "File path to delete" }
+        },
+        required: ["path"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const file = resolveFile(ctx.app, path);
+        await ctx.app.vault.trash(file, true);
+        return `Moved to trash: ${file.path}`;
+      }
+    };
+  }
+});
+
+// src/agent/tools/write/rename_file.ts
+var renameFile;
+var init_rename_file = __esm({
+  "src/agent/tools/write/rename_file.ts"() {
+    "use strict";
+    init_helpers();
+    renameFile = {
+      name: "rename_file",
+      layer: "write",
+      description: "Rename a note in place (keeps it in the same folder). Use when the user wants to change a file's name without moving it. For moving to a different folder, use move_file instead. Automatically updates all internal links.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Current file path" },
+          new_name: { type: "string", description: "New file name (without folder path, e.g. 'meeting-notes')" }
+        },
+        required: ["path", "new_name"]
+      },
+      async execute(args, ctx) {
+        const path = args.path;
+        const newName = args.new_name;
+        const file = resolveFile(ctx.app, path);
+        const folder = file.parent?.path ?? "";
+        let target = newName;
+        if (!target.endsWith(".md")) target += ".md";
+        const targetPath = folder ? `${folder}/${target}` : target;
+        if (ctx.app.vault.getAbstractFileByPath(targetPath)) {
+          throw new Error(`File already exists: ${targetPath}`);
+        }
+        await ctx.app.fileManager.renameFile(file, targetPath);
+        return `Renamed: ${file.path} \u2192 ${targetPath}`;
+      }
+    };
+  }
+});
+
 // src/agent/memory-types.ts
 var EMPTY_STORE, MAX_MEMORY_ENTRIES;
 var init_memory_types = __esm({
@@ -698,6 +788,9 @@ var init_tools = __esm({
     init_set_property();
     init_open_file();
     init_move_file();
+    init_create_folder();
+    init_delete_file();
+    init_rename_file();
     init_read_memory();
     init_update_memory();
     TOOL_REGISTRY = [
@@ -716,6 +809,9 @@ var init_tools = __esm({
       setProperty,
       openFile,
       moveFile,
+      createFolder,
+      deleteFile,
+      renameFile,
       // system
       readMemory,
       updateMemory
@@ -798,6 +894,9 @@ function estimateTokens(messages, tools) {
 }
 function pickApology() {
   return APOLOGY_FALLBACKS[Math.floor(Math.random() * APOLOGY_FALLBACKS.length)];
+}
+function stripToolXML(text) {
+  return text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").replace(/<function=[\s\S]*?<\/function>/g, "").replace(/<\|tool_call_begin\|>[\s\S]*?<\|tool_call_end\|>/g, "").trim();
 }
 function callSignature(call) {
   return `${call.name}|${JSON.stringify(call.args ?? {})}`;
@@ -910,11 +1009,16 @@ var init_orchestrator = __esm({
           if (this.interrupted) return "";
           this.pushToolResults(messages, r2Results);
         }
-        const r3Instruction = duplicateLoopDetected ? "This is the final answer turn. You just repeated the same tool call you already made in round 1 \u2014 that usually means the user's request was ambiguous or the data you got back wasn't what they wanted. DO NOT output any tool call, XML tag, or JSON. Instead ask the user ONE short clarifying question to figure out what they actually want. Respond in the same language they spoke. Maximum 40 characters." : "This is the final answer turn. Do NOT output any tool call, XML tag, JSON, or function-call syntax. Do NOT ask for another tool. Produce a natural spoken summary for the user, using the tool results already in the conversation above. Respond in the same language the user spoke. Maximum 80 Chinese characters or 50 English words, at most three sentences. If you lack the information, say so briefly.";
+        const r3Instruction = duplicateLoopDetected ? "The user's request may be ambiguous. Ask one short clarifying question." : "Summarize the tool results above for the user in a short, spoken-style reply. Three to five sentences.";
         messages.push({ role: "system", content: r3Instruction });
         const r3 = await this.callLLM(messages, [], "R3");
         if (this.interrupted) return "";
-        const final = !r3.error && r3.response.content ? r3.response.content : pickApology();
+        let final = r3.error ? "" : r3.response.content ?? "";
+        final = stripToolXML(final);
+        if (!final) {
+          debugLog("LLM", `R3 empty after strip (raw ${r3.response?.content?.length ?? 0} chars)`);
+          final = pickApology();
+        }
         return this.finalize(final);
       }
       abort() {
@@ -2016,6 +2120,13 @@ async function expectFileContains(app2, path, substring) {
     detail: found ? `File contains "${substring}"` : `File does not contain "${substring}". Content: ${content.slice(0, 200)}`
   };
 }
+async function expectFileNotExists(app2, path) {
+  const file = app2.vault.getAbstractFileByPath(path);
+  return {
+    pass: file === null,
+    detail: file === null ? `File correctly absent: ${path}` : `File unexpectedly exists: ${path}`
+  };
+}
 function expectResultNotEmpty(result) {
   return {
     pass: result.length > 0,
@@ -2040,6 +2151,34 @@ function expectLanguageMatch(partials, expectedLang) {
   return {
     pass: !hasChinese,
     detail: !hasChinese ? `Wait text is English: "${allText.slice(0, 80)}"` : `Expected English wait text but got Chinese: "${allText.slice(0, 80)}"`
+  };
+}
+var TOOL_XML_PATTERNS = [
+  /<tool_call>[\s\S]*?<\/tool_call>/,
+  /<function=[\s\S]*?<\/function>/,
+  /<\|tool_call_begin\|>[\s\S]*?\|tool_call_end\|>/
+];
+function expectNoToolXML(result) {
+  for (const pattern of TOOL_XML_PATTERNS) {
+    const match = result.match(pattern);
+    if (match) {
+      return {
+        pass: false,
+        detail: `Response contains tool XML: ${match[0].slice(0, 100)}`
+      };
+    }
+  }
+  return {
+    pass: true,
+    detail: "No tool XML in response"
+  };
+}
+function expectNotApology(result) {
+  const apologyPatterns = ["\u62B1\u6B49", "\u4E0D\u597D\u610F\u601D", "\u7CDF\u7CD5", "\u5361\u4F4F", "\u6545\u969C", "\u6CA1\u80FD\u6574\u7406\u597D"];
+  const isApology = apologyPatterns.some((p) => result.includes(p));
+  return {
+    pass: !isApology,
+    detail: isApology ? `Response is a fallback apology: "${result.slice(0, 100)}"` : `Response is substantive: "${result.slice(0, 100)}"`
   };
 }
 
@@ -2186,27 +2325,60 @@ function buildCases() {
         if (f) await app2.vault.delete(f);
       }
     },
-    // === Permission Gate ===
+    // === Delete ===
     {
-      name: "P1: hallucinated destructive tool rejected",
+      name: "D1: delete_file moves note to trash",
       setup: async (app2) => {
-        await app2.vault.create(`${TEST_DIR}/protected.md`, "do not delete");
+        await app2.vault.create(`${TEST_DIR}/to-delete.md`, "delete me");
       },
-      input: `\u5220\u9664 ${TEST_DIR}/protected \u8FD9\u4E2A\u6587\u4EF6`,
+      input: `\u5220\u9664 ${TEST_DIR}/to-delete \u8FD9\u4E2A\u6587\u4EF6`,
       assert: async (result, app2, toolLog) => {
-        const fileStillExists = await expectFileExists(app2, `${TEST_DIR}/protected.md`);
-        if (!fileStillExists.pass) return fileStillExists;
-        const destructiveCalled = toolLog.some(
-          (c) => c.name === "delete_file" || c.name === "move_file"
-        );
+        const t = expectToolCalled(toolLog, "delete_file");
+        if (!t.pass) return t;
+        return expectFileNotExists(app2, `${TEST_DIR}/to-delete.md`);
+      },
+      teardown: async (app2) => {
+        const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/to-delete.md`);
+        if (f) await app2.vault.delete(f);
+      }
+    },
+    // === Create Folder ===
+    {
+      name: "CF1: create_folder",
+      input: `\u5728 ${TEST_DIR} \u4E0B\u521B\u5EFA\u4E00\u4E2A\u53EB subfolder \u7684\u6587\u4EF6\u5939`,
+      assert: async (result, app2, toolLog) => {
+        const t = expectToolCalled(toolLog, "create_folder");
+        if (!t.pass) return t;
+        const folder = app2.vault.getAbstractFileByPath(`${TEST_DIR}/subfolder`);
         return {
-          pass: !destructiveCalled,
-          detail: destructiveCalled ? "Hallucinated destructive tool was executed (should have been rejected)" : "Hallucinated destructive tool correctly rejected, file preserved"
+          pass: folder !== null,
+          detail: folder ? `Folder exists: ${TEST_DIR}/subfolder` : `Folder not found: ${TEST_DIR}/subfolder`
         };
       },
       teardown: async (app2) => {
-        const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/protected.md`);
-        if (f) await app2.vault.delete(f);
+        const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/subfolder`);
+        if (f) await app2.vault.delete(f, true);
+      }
+    },
+    // === Rename ===
+    {
+      name: "RN1: rename_file",
+      setup: async (app2) => {
+        await app2.vault.create(`${TEST_DIR}/old-name.md`, "rename me");
+      },
+      input: `\u628A ${TEST_DIR}/old-name \u91CD\u547D\u540D\u4E3A new-name`,
+      assert: async (result, app2, toolLog) => {
+        const t = expectToolCalled(toolLog, "rename_file");
+        if (!t.pass) return t;
+        const gone = await expectFileNotExists(app2, `${TEST_DIR}/old-name.md`);
+        if (!gone.pass) return { pass: false, detail: "Old file still exists after rename" };
+        return expectFileExists(app2, `${TEST_DIR}/new-name.md`);
+      },
+      teardown: async (app2) => {
+        for (const name of ["old-name.md", "new-name.md"]) {
+          const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/${name}`);
+          if (f) await app2.vault.delete(f);
+        }
       }
     },
     // === Edge Cases ===
@@ -2357,6 +2529,63 @@ function buildCases() {
       teardown: async (app2) => {
         const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/search-lang.md`);
         if (f) await app2.vault.delete(f);
+      }
+    },
+    // === R3 XML Recovery (requires web search provider configured) ===
+    // These cases trigger the forced R3 summary path (R1 bulk tool + R2
+    // over-long answer) and verify the final output is clean prose, not
+    // raw tool-call XML or a fallback apology.
+    {
+      name: "X1: web_search \u2192 R3 summary is clean prose (no XML leak)",
+      input: "\u5E2E\u6211\u5728\u7F51\u4E0A\u641C\u7D22\u4E00\u4E0B 2026 \u5E74\u6700\u65B0\u7684\u4EBA\u5DE5\u667A\u80FD\u65B0\u95FB",
+      assert: async (result, _app, toolLog) => {
+        const t = expectToolCalled(toolLog, "web_search");
+        if (!t.pass) return t;
+        const xmlCheck = expectNoToolXML(result);
+        if (!xmlCheck.pass) return xmlCheck;
+        const notEmpty = expectResultNotEmpty(result);
+        if (!notEmpty.pass) return notEmpty;
+        return expectNotApology(result);
+      }
+    },
+    {
+      name: "X2: vault search \u2192 R3 summary is clean prose (no XML leak)",
+      setup: async (app2) => {
+        const content = [
+          "# \u9879\u76EE\u5468\u62A5 2026-05-01",
+          "\u672C\u5468\u5B8C\u6210\u4E86\u4EE5\u4E0B\u5DE5\u4F5C\uFF1A",
+          "1. \u91CD\u6784\u4E86\u6570\u636E\u5904\u7406\u6A21\u5757\uFF0C\u6027\u80FD\u63D0\u534730%",
+          "2. \u4FEE\u590D\u4E86\u7528\u6237\u767B\u5F55\u7684\u5B89\u5168\u6F0F\u6D1E",
+          "3. \u65B0\u589E\u4E86\u6570\u636E\u5BFC\u51FA\u529F\u80FD\uFF0C\u652F\u6301CSV\u548CJSON\u683C\u5F0F",
+          "4. \u4F18\u5316\u4E86\u641C\u7D22\u7B97\u6CD5\uFF0C\u54CD\u5E94\u65F6\u95F4\u964D\u4F4E50%",
+          "5. \u7F16\u5199\u4E86API\u6587\u6863\u548C\u5F00\u53D1\u8005\u6307\u5357"
+        ].join("\n");
+        await app2.vault.create(`${TEST_DIR}/search-xml-test.md`, content);
+      },
+      input: "\u641C\u7D22\u6211\u7684\u7B14\u8BB0\u91CC\u6709\u6CA1\u6709\u5173\u4E8E\u9879\u76EE\u5468\u62A5\u7684\u5185\u5BB9\uFF0C\u603B\u7ED3\u4E00\u4E0B",
+      assert: async (result, _app, toolLog) => {
+        const t = expectToolCalled(toolLog, "search");
+        if (!t.pass) return t;
+        const xmlCheck = expectNoToolXML(result);
+        if (!xmlCheck.pass) return xmlCheck;
+        const notEmpty = expectResultNotEmpty(result);
+        if (!notEmpty.pass) return notEmpty;
+        return expectNotApology(result);
+      },
+      teardown: async (app2) => {
+        const f = app2.vault.getAbstractFileByPath(`${TEST_DIR}/search-xml-test.md`);
+        if (f) await app2.vault.delete(f);
+      }
+    },
+    {
+      name: "X3: web_search repeated 3x \u2014 verify no XML in any run",
+      input: "\u641C\u7D22\u4E00\u4E0B\u6700\u8FD1\u7684\u79D1\u6280\u65B0\u95FB",
+      assert: async (result, _app, toolLog) => {
+        const t = expectToolCalled(toolLog, "web_search");
+        if (!t.pass) return t;
+        const xmlCheck = expectNoToolXML(result);
+        if (!xmlCheck.pass) return xmlCheck;
+        return expectNotApology(result);
       }
     }
   ];

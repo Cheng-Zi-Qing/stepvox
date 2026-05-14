@@ -10,6 +10,8 @@ import {
   expectResultNotEmpty,
   expectLanguageMatch,
   containsChinese,
+  expectNoToolXML,
+  expectNotApology,
 } from "./helpers";
 
 const TEST_DIR = "_stepvox_test";
@@ -379,6 +381,64 @@ export function buildCases(): TestCase[] {
       teardown: async (app) => {
         const f = app.vault.getAbstractFileByPath(`${TEST_DIR}/search-lang.md`);
         if (f) await app.vault.delete(f);
+      },
+    },
+    // === R3 XML Recovery (requires web search provider configured) ===
+    // These cases trigger the forced R3 summary path (R1 bulk tool + R2
+    // over-long answer) and verify the final output is clean prose, not
+    // raw tool-call XML or a fallback apology.
+    {
+      name: "X1: web_search → R3 summary is clean prose (no XML leak)",
+      input: "帮我在网上搜索一下 2026 年最新的人工智能新闻",
+      assert: async (result, _app, toolLog) => {
+        const t = expectToolCalled(toolLog, "web_search");
+        if (!t.pass) return t;
+        const xmlCheck = expectNoToolXML(result);
+        if (!xmlCheck.pass) return xmlCheck;
+        const notEmpty = expectResultNotEmpty(result);
+        if (!notEmpty.pass) return notEmpty;
+        return expectNotApology(result);
+      },
+    },
+    {
+      name: "X2: vault search → R3 summary is clean prose (no XML leak)",
+      setup: async (app) => {
+        // Create enough content so R2's answer exceeds LONG_ANSWER_CHAR_LIMIT (80)
+        const content = [
+          "# 项目周报 2026-05-01",
+          "本周完成了以下工作：",
+          "1. 重构了数据处理模块，性能提升30%",
+          "2. 修复了用户登录的安全漏洞",
+          "3. 新增了数据导出功能，支持CSV和JSON格式",
+          "4. 优化了搜索算法，响应时间降低50%",
+          "5. 编写了API文档和开发者指南",
+        ].join("\n");
+        await app.vault.create(`${TEST_DIR}/search-xml-test.md`, content);
+      },
+      input: "搜索我的笔记里有没有关于项目周报的内容，总结一下",
+      assert: async (result, _app, toolLog) => {
+        const t = expectToolCalled(toolLog, "search");
+        if (!t.pass) return t;
+        const xmlCheck = expectNoToolXML(result);
+        if (!xmlCheck.pass) return xmlCheck;
+        const notEmpty = expectResultNotEmpty(result);
+        if (!notEmpty.pass) return notEmpty;
+        return expectNotApology(result);
+      },
+      teardown: async (app) => {
+        const f = app.vault.getAbstractFileByPath(`${TEST_DIR}/search-xml-test.md`);
+        if (f) await app.vault.delete(f);
+      },
+    },
+    {
+      name: "X3: web_search repeated 3x — verify no XML in any run",
+      input: "搜索一下最近的科技新闻",
+      assert: async (result, _app, toolLog) => {
+        const t = expectToolCalled(toolLog, "web_search");
+        if (!t.pass) return t;
+        const xmlCheck = expectNoToolXML(result);
+        if (!xmlCheck.pass) return xmlCheck;
+        return expectNotApology(result);
       },
     },
   ];
