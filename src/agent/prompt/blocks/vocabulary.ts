@@ -10,6 +10,6 @@ export const vocabulary: PromptBlock = {
   render(ctx) {
     const vaultName = ctx.app.vault.getName();
     return `## Vocabulary
-Treat the following terms as interchangeable: "vault", "workspace", "work space", "work-space", "笔记库", "我的笔记", "知识库". They all refer to the single Obsidian vault the user is in right now ("${vaultName}"). Never ask which workspace — there is exactly one.`;
+Treat the following terms as interchangeable: "vault", "workspace", "work space", "work-space", "notebook", "knowledge base", "notes". They all refer to the single Obsidian vault the user is in right now ("${vaultName}"). Never ask which workspace — there is exactly one.`;
   },
 };

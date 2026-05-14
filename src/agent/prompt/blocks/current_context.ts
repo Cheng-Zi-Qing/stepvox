@@ -24,7 +24,7 @@ export const currentContext: PromptBlock = {
     const activeFile = ctx.app.workspace.getActiveFile();
     const fileLine = activeFile ? `\n- Active file: ${activeFile.path}` : "";
     return `## Current Context
-- Today's date: ${formatToday()} — use this as the authoritative "now". When the user says "今年/今天/最近/最新" or "this year/today/recent/latest", resolve against this date, not your training cutoff.
+- Today's date: ${formatToday()} — use this as the authoritative "now". When the user says "this year", "today", "recent", or "latest", resolve against this date, not your training cutoff.
 - Vault: ${vaultName}${fileLine}`;
   },
 };
