@@ -608,6 +608,7 @@ export class VoicePipeline {
       provider: this.llm!,
       toolExecutor: this.toolExecutor,
       systemPromptBuilder: () => buildSystemPrompt(this.app, this.settings, this.currentVaultSnapshot),
+      responseLanguage: this.settings.interaction.responseLanguage,
     });
   }
 

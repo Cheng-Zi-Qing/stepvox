@@ -56,6 +56,7 @@ export interface StepVoxSettings {
   };
   interaction: {
     enableSessionMode: boolean;
+    responseLanguage: "zh" | "en";
   };
   audio: {
     sampleRate: number;
@@ -104,6 +105,7 @@ export const DEFAULT_SETTINGS: StepVoxSettings = {
   },
   interaction: {
     enableSessionMode: false,
+    responseLanguage: "zh",
   },
   audio: {
     sampleRate: DEFAULT_SAMPLE_RATE,
@@ -468,6 +470,20 @@ export class StepVoxSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.interaction.enableSessionMode)
           .onChange(async (value) => {
             this.plugin.settings.interaction.enableSessionMode = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Response language")
+      .setDesc("The language the assistant replies in.")
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("zh", "Chinese")
+          .addOption("en", "English")
+          .setValue(this.plugin.settings.interaction.responseLanguage)
+          .onChange(async (value) => {
+            this.plugin.settings.interaction.responseLanguage = value as "zh" | "en";
             await this.plugin.saveSettings();
           })
       );

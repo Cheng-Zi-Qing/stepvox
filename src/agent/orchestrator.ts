@@ -84,15 +84,18 @@ export class AgentOrchestrator {
   private abortController: AbortController | null = null;
   private interrupted = false;
   private systemPromptBuilder: () => string;
+  private responseLanguage: string;
 
   constructor(opts: {
     provider: LLMProvider;
     toolExecutor: ToolExecutor;
     systemPromptBuilder: () => string;
+    responseLanguage?: string;
   }) {
     this.provider = opts.provider;
     this.toolExecutor = opts.toolExecutor;
     this.systemPromptBuilder = opts.systemPromptBuilder;
+    this.responseLanguage = opts.responseLanguage ?? "zh";
   }
 
   async run(userInput: string, callbacks?: OrchestratorCallbacks): Promise<string> {
@@ -199,11 +202,21 @@ export class AgentOrchestrator {
     }
 
     // ----- Round 3: forced summary, no tools -----
-    const r3Instruction = duplicateLoopDetected
-      ? "The user's request may be ambiguous. Ask one short clarifying question."
-      : "Summarize the tool results above for the user in a short, spoken-style reply. Three to five sentences.";
-    messages.push({ role: "system", content: r3Instruction });
-    const r3 = await this.callLLM(messages, [], "R3");
+    if (duplicateLoopDetected) {
+      messages.push({
+        role: "system",
+        content: "The user's request may be ambiguous. Ask one short clarifying question.",
+      });
+      const r3 = await this.callLLM(messages, [], "R3");
+      if (this.interrupted) return "";
+      let final = r3.error ? "" : (r3.response!.content ?? "");
+      final = stripToolXML(final);
+      if (!final) final = pickApology();
+      return this.finalize(final);
+    }
+
+    const r3Messages = this.buildR3SummaryMessages(userInput, messages);
+    const r3 = await this.callLLM(r3Messages, [], "R3");
     if (this.interrupted) return "";
 
     let final = r3.error ? "" : (r3.response!.content ?? "");
@@ -364,6 +377,50 @@ export class AgentOrchestrator {
     if (dateMatch) debugLog("PROMPT", `injected date: ${dateMatch[1]}`);
 
     return [{ role: "system", content: systemPrompt }, ...this.history];
+  }
+
+  /**
+   * Build an isolated messages array for R3 summary. Instead of reusing
+   * the full accumulated context (system prompt + tool schemas + history),
+   * we construct a minimal prompt with just the user query, tool results,
+   * and a focused summary instruction. This avoids English-heavy context
+   * pulling the model's language away from the user's preference.
+   */
+  private buildR3SummaryMessages(
+    userQuery: string,
+    fullMessages: LLMMessage[]
+  ): LLMMessage[] {
+    // Collect all tool results from the conversation
+    const toolResults: string[] = [];
+    for (const m of fullMessages) {
+      if (m.role === "tool" && m.content) {
+        toolResults.push(m.content);
+      }
+    }
+
+    const lang = this.responseLanguage === "en" ? "English" : "Chinese";
+
+    const systemContent = [
+      "You are a voice assistant summarizing information for the user.",
+      "",
+      "Rules:",
+      "- Three to five spoken-style sentences.",
+      "- Preserve key facts: names, numbers, dates, and URLs must be accurate.",
+      "- Do not fabricate information beyond what is provided.",
+      `- Reply in ${lang}.`,
+    ].join("\n");
+
+    const userContent = [
+      `User asked: ${userQuery}`,
+      "",
+      "Results:",
+      toolResults.join("\n\n---\n\n"),
+    ].join("\n");
+
+    return [
+      { role: "system", content: systemContent },
+      { role: "user", content: userContent },
+    ];
   }
 
   private trimHistory(): void {
