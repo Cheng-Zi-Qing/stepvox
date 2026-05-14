@@ -255,12 +255,13 @@ export class StepVoxSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.addClass("stepvox-settings");
 
-    // StepFun Global
-    new Setting(containerEl).setName("StepFun 配置").setHeading();
+    // ── StepFun (ASR & TTS) ─────────────────────────────
+    new Setting(containerEl).setName("StepFun (ASR & TTS)").setHeading();
+
     let stepfunKeyText: TextComponent;
     new Setting(containerEl)
-      .setName("API Key")
-      .setDesc("StepFun API Key (用于 ASR、TTS 和 LLM)")
+      .setName("API key")
+      .setDesc("Used for speech recognition (ASR) and text-to-speech (TTS).")
       .addText((text) => {
         stepfunKeyText = text;
         text
@@ -276,30 +277,32 @@ export class StepVoxSettingTab extends PluginSettingTab {
         let shown = false;
         btn
           .setIcon("eye")
-          .setTooltip("Show API key / 显示")
+          .setTooltip("Show API key")
           .onClick(() => {
             shown = !shown;
             stepfunKeyText.inputEl.type = shown ? "text" : "password";
             btn.setIcon(shown ? "eye-off" : "eye");
-            btn.setTooltip(shown ? "Hide API key / 隐藏" : "Show API key / 显示");
+            btn.setTooltip(shown ? "Hide API key" : "Show API key");
           });
       });
+
     new Setting(containerEl)
-      .setName("地区")
-      .setDesc("选择服务地区")
+      .setName("Region")
+      .setDesc("Service region for StepFun API calls.")
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("china", "中国")
-          .addOption("global", "国际版")
+          .addOption("china", "China")
+          .addOption("global", "Global")
           .setValue(this.plugin.settings.stepfun.region)
           .onChange(async (value) => {
             this.plugin.settings.stepfun.region = value as "china" | "global";
             await this.plugin.saveSettings();
           })
       );
+
     new Setting(containerEl)
-      .setName("模式")
-      .setDesc("选择 API 模式（Coding Plan 计费更友好）")
+      .setName("Billing mode")
+      .setDesc("Billing mode for ASR and TTS calls. Coding Plan is more cost-effective.")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("plan", "Coding Plan")
@@ -311,14 +314,9 @@ export class StepVoxSettingTab extends PluginSettingTab {
           })
       );
 
-    // ASR
-    new Setting(containerEl).setName("ASR (Speech-to-Text)").setHeading();
-
-    // TTS
-    new Setting(containerEl).setName("TTS (Text-to-Speech)").setHeading();
     new Setting(containerEl)
-      .setName("Enabled")
-      .setDesc("Enable voice responses")
+      .setName("TTS enabled")
+      .setDesc("Enable spoken responses.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.tts.enabled)
@@ -327,21 +325,22 @@ export class StepVoxSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
     new Setting(containerEl)
-      .setName("Model")
-      .setDesc("TTS model")
+      .setName("TTS model")
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("stepaudio-2.5-tts", "stepaudio-2.5-tts (推荐)")
+          .addOption("stepaudio-2.5-tts", "stepaudio-2.5-tts")
           .setValue(this.plugin.settings.tts.model)
           .onChange(async (value) => {
             this.plugin.settings.tts.model = value;
             await this.plugin.saveSettings();
           })
       );
+
     new Setting(containerEl)
-      .setName("Voice")
-      .setDesc("TTS voice style — click Refresh to load available voices")
+      .setName("TTS voice")
+      .setDesc("Click Refresh to load available voices from the API.")
       .addDropdown((dropdown) => {
         const current = this.plugin.settings.tts.voice;
         if (current) {
@@ -357,11 +356,12 @@ export class StepVoxSettingTab extends PluginSettingTab {
         btn.setButtonText("Refresh").onClick(() => this.fetchVoices())
       );
 
-    // LLM
+    // ── LLM ─────────────────────────────────────────────
     new Setting(containerEl).setName("LLM").setHeading();
+
     new Setting(containerEl)
       .setName("Provider")
-      .setDesc("选择 LLM 提供商")
+      .setDesc("Language model provider for the assistant.")
       .addDropdown((dropdown) => {
         for (const p of LLM_PROVIDERS) dropdown.addOption(p.id, p.name);
         dropdown
@@ -369,20 +369,18 @@ export class StepVoxSettingTab extends PluginSettingTab {
           .onChange(async (value) => {
             this.plugin.settings.llm.activeProvider = value;
             await this.plugin.saveSettings();
-            this.display(); // re-render fields for the new provider
+            this.display();
           });
       });
 
-    // Auto-render the active provider's config schema. Adding a new
-    // provider requires zero edits to this UI code (D57).
     const activeEntry = getLLMProviderEntry(this.plugin.settings.llm.activeProvider);
     if (activeEntry) {
       this.renderProviderConfig(containerEl, activeEntry.id, activeEntry.configSchema);
     }
 
     new Setting(containerEl)
-      .setName("Test Connection")
-      .setDesc("Send a test request to verify the active provider's settings")
+      .setName("Test connection")
+      .setDesc("Send a test request to verify the active provider works.")
       .addButton((btn) =>
         btn.setButtonText("Test").onClick(async () => {
           new Notice("Testing LLM connection...");
@@ -400,25 +398,12 @@ export class StepVoxSettingTab extends PluginSettingTab {
         })
       );
 
-    // Interaction
-    new Setting(containerEl).setName("Interaction").setHeading();
-    new Setting(containerEl)
-      .setName("Enable Session Mode")
-      .setDesc("持续对话模式：按一次进入会话，多轮对话直到退出")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.interaction.enableSessionMode)
-          .onChange(async (value) => {
-            this.plugin.settings.interaction.enableSessionMode = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    // Search
+    // ── Web Search ──────────────────────────────────────
     new Setting(containerEl).setName("Web Search").setHeading();
+
     new Setting(containerEl)
       .setName("Provider")
-      .setDesc("外部搜索服务（用于 web_search 工具）")
+      .setDesc("External search service for the web_search tool.")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("none", "Disabled")
@@ -431,10 +416,11 @@ export class StepVoxSettingTab extends PluginSettingTab {
             this.display();
           })
       );
+
     if (this.plugin.settings.search.provider !== "none") {
       let searchKeyText: TextComponent;
       new Setting(containerEl)
-        .setName("API Key")
+        .setName("API key")
         .addText((text) => {
           searchKeyText = text;
           text
@@ -450,12 +436,12 @@ export class StepVoxSettingTab extends PluginSettingTab {
           let shown = false;
           btn
             .setIcon("eye")
-            .setTooltip("Show API key / 显示")
+            .setTooltip("Show API key")
             .onClick(() => {
               shown = !shown;
               searchKeyText.inputEl.type = shown ? "text" : "password";
               btn.setIcon(shown ? "eye-off" : "eye");
-              btn.setTooltip(shown ? "Hide API key / 隐藏" : "Show API key / 显示");
+              btn.setTooltip(shown ? "Hide API key" : "Show API key");
             });
         })
         .addButton((button) =>
@@ -467,37 +453,68 @@ export class StepVoxSettingTab extends PluginSettingTab {
         );
     }
 
-    // Personality (D61: Identity + Personality traits — only style is exposed)
+    // ── Personality ─────────────────────────────────────
     new Setting(containerEl).setName("Personality").setHeading();
     this.renderEditablePromptBlocks(containerEl);
 
-    // Hotkeys — direct user to Obsidian's built-in hotkey manager.
-    new Setting(containerEl).setName("Hotkeys").setHeading();
+    // ── Advanced ────────────────────────────────────────
+    new Setting(containerEl).setName("Advanced").setHeading();
+
     new Setting(containerEl)
-      .setName("快捷键配置")
-      .setDesc("StepVox 仅提供一个快捷键：Toggle voice recording —— 触发一次等同于点击面板上的麦克风按钮。请在 Obsidian 的 Settings → Hotkeys 中搜索 \"StepVox\" 进行绑定。")
-      .addButton((btn) =>
-        btn.setButtonText("打开 Hotkeys 设置").onClick(() => {
-          // Navigate Obsidian to its Hotkeys settings page, scoped to "StepVox".
-          const setting = (this.app as unknown as {
-            setting?: { open: () => void; openTabById: (id: string) => unknown };
-          }).setting;
-          if (setting?.openTabById) {
-            setting.open();
-            const tab = setting.openTabById("hotkeys") as { searchComponent?: { setValue: (v: string) => void; onChanged?: () => void } } | undefined;
-            tab?.searchComponent?.setValue("StepVox");
-            tab?.searchComponent?.onChanged?.();
-          } else {
-            new Notice("请打开 Settings → Hotkeys 搜索 StepVox");
-          }
-        })
+      .setName("Session mode")
+      .setDesc("Keep a continuous multi-turn conversation until you say a stop keyword.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.interaction.enableSessionMode)
+          .onChange(async (value) => {
+            this.plugin.settings.interaction.enableSessionMode = value;
+            await this.plugin.saveSettings();
+          })
       );
 
-    // Debug
-    new Setting(containerEl).setName("Debug").setHeading();
+    new Setting(containerEl)
+      .setName("Sample rate")
+      .setDesc("Microphone sample rate in Hz. Default 16000.")
+      .addText((text) => {
+        text.inputEl.type = "number";
+        text
+          .setValue(String(this.plugin.settings.audio.sampleRate))
+          .onChange(async (value) => {
+            const parsed = parseInt(value, 10);
+            if (Number.isFinite(parsed) && parsed > 0) {
+              this.plugin.settings.audio.sampleRate = parsed;
+              await this.plugin.saveSettings();
+            }
+          });
+      });
+
+    new Setting(containerEl)
+      .setName("Noise suppression")
+      .setDesc("Browser-level noise suppression on the microphone input.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.audio.noiseSuppression)
+          .onChange(async (value) => {
+            this.plugin.settings.audio.noiseSuppression = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Echo cancellation")
+      .setDesc("Browser-level echo cancellation on the microphone input.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.audio.echoCancellation)
+          .onChange(async (value) => {
+            this.plugin.settings.audio.echoCancellation = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
     new Setting(containerEl)
       .setName("Debug mode")
-      .setDesc("在浏览器 console 输出调试日志，并写入 .obsidian/plugins/stepvox/debug.log")
+      .setDesc("Log to browser console and write to .obsidian/plugins/stepvox/debug.log.")
       .addToggle((toggle) =>
         toggle
           .setValue(this.plugin.settings.debug.enabled)
@@ -506,6 +523,7 @@ export class StepVoxSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
   }
 
   /**
