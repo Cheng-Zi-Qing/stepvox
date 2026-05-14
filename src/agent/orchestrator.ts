@@ -12,7 +12,7 @@ const WEB_SEARCH_TIMEOUT_MS = 8_000;
 const MAX_ROUNDS = 3;
 const SLOW_TOOL_THRESHOLD_MS = 3_000;
 const MEMORY_HINT_INTERVAL = 10;
-const MAX_HISTORY_MESSAGES = 20;
+const MAX_HISTORY_MESSAGES = 40;
 
 // When R1 used a bulk-data tool (web_search / search) and R2 returned
 // content longer than this, force the R3 summary round instead of
