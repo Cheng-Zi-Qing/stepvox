@@ -1,7 +1,7 @@
 {
   "id": "stepvox",
   "name": "StepVox",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "minAppVersion": "1.7.0",
   "description": "Voice-controlled assistant for your vault. Speak to query, edit, and create notes via StepFun ASR/TTS plus a configurable LLM (StepFun, OpenAI, or Anthropic). Requires API keys.",
   "author": "ZiqingCheng",
