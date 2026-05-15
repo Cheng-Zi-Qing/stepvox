@@ -26,10 +26,17 @@ import type { PhaseDelegate, Phase } from "./PhaseDelegate";
 // D48: ASR/TTS hard timeouts. LLM/tool timeouts live in orchestrator.
 const ASR_CONNECT_TIMEOUT_MS = 5_000;
 const ASR_FINAL_TIMEOUT_MS = 5_000;
-const TTS_SYNTH_TIMEOUT_MS = 10_000;
-// Upper bound on a single TTS synthesis request. step voice starts to
-// 10s-timeout past ~150 chars. Keep chunks comfortably below.
-const TTS_MAX_CHUNK_CHARS = 120;
+// Adaptive TTS chunking — three tiers.
+// C1 is small for fast first-byte latency (~3.7s synth).
+// C2 is medium-sized and fires concurrently with C1; its synth (~8.5s) fits
+//   within C1's playback (~12.9s).
+// C3+ are large for prosody continuity; each fires serially after the
+//   previous synth completes and fits within the previous chunk's playback
+//   window (C2 play ≈ 30s covers C3 synth ≈ 26s; C3 play ≈ 86s covers anything).
+const TTS_FIRST_CHUNK_CHARS  = 60;
+const TTS_SECOND_CHUNK_CHARS = 150;
+const TTS_REST_CHUNK_CHARS   = 400;
+const TTS_SYNTH_TIMEOUT_MS   = 30_000;
 
 // After a Vad2-driven barge-in, give the user this long to start speaking.
 // If Vad1's onIdleTimeout fires (no speech detected) the pipeline treats it
@@ -72,17 +79,38 @@ export interface PipelineCallbacks {
 }
 
 /**
- * Split a long TTS text into chunks that stay under the provider's
- * per-request ceiling. Prefers breaks on Chinese + ASCII sentence
- * punctuation so the audio sounds natural at the seams.
+ * Split a long TTS text into three-tiered chunks for adaptive synthesis.
+ *
+ * - Chunk 1 uses `firstMax` (small, fast first-byte).
+ * - Chunk 2 uses `secondMax` (medium, concurrent with C1).
+ * - Chunks 3+ use `restMax` (large, fewer cuts = better prosody).
+ *
+ * Prefers breaks on Chinese + ASCII sentence punctuation so the audio
+ * sounds natural at the seams.
  */
-function chunkForTTS(text: string, maxChars: number): string[] {
-  if (text.length <= maxChars) return [text];
+export function chunkForTTS(
+  text: string,
+  firstMax: number,
+  secondMax: number,
+  restMax: number,
+): string[] {
+  if (text.length <= firstMax) return [text];
 
   const chunks: string[] = [];
   let remaining = text;
+  let chunkIndex = 0;
 
-  while (remaining.length > maxChars) {
+  while (remaining.length > 0) {
+    const maxChars =
+      chunkIndex === 0 ? firstMax :
+      chunkIndex === 1 ? secondMax :
+      restMax;
+
+    if (remaining.length <= maxChars) {
+      chunks.push(remaining);
+      break;
+    }
+
     const window = remaining.slice(0, maxChars);
     // Look back for a sensible break: strong punctuation first, then weaker.
     const strongBreak = Math.max(
@@ -105,9 +133,9 @@ function chunkForTTS(text: string, maxChars: number): string[] {
     const piece = remaining.slice(0, cutAt).trim();
     if (piece) chunks.push(piece);
     remaining = remaining.slice(cutAt).trim();
+    chunkIndex++;
   }
 
-  if (remaining) chunks.push(remaining);
   return chunks;
 }
 
@@ -143,14 +171,10 @@ export class VoicePipeline {
   private asrFinalTimer: ReturnType<typeof setTimeout> | null = null;
   private spokenToolStatus = new Set<string>(); // per-turn de-dup so the user doesn't hear the same status twice
 
-  // TTS pipeline. Two parallel chains so playback never has to wait for
-  // synthesis: while chunk N is playing through the speaker, chunk N+1's
-  // synthesise call is already in flight. ttsChain is the public-facing
-  // "everything has finished playing" promise; ttsSynthChain serialises
-  // synthesis requests so we don't fan a long answer out as N concurrent
-  // POSTs to the TTS endpoint (the provider would rate-limit).
+  // TTS pipeline. ttsChain is the "everything has finished playing" promise.
+  // Playback is always sequential; synthesis scheduling varies by chunk
+  // position (see enqueueTTS for the C1+C2 concurrent / C3+ serial strategy).
   private ttsChain: Promise<void> = Promise.resolve();
-  private ttsSynthChain: Promise<void> = Promise.resolve();
   private ttsAborted = false;
 
   private perfTracker = new PerformanceTracker();
@@ -349,7 +373,6 @@ export class VoicePipeline {
   private async armListening(): Promise<void> {
     this.ttsAborted = false;
     this.ttsChain = Promise.resolve();
-    this.ttsSynthChain = Promise.resolve();
 
     if (!this.asr) {
       throw new Error("ASR not configured");
@@ -470,7 +493,6 @@ export class VoicePipeline {
     this.ttsAborted = true;
     this.player.stop();
     this.ttsChain = Promise.resolve();
-    this.ttsSynthChain = Promise.resolve();
     this.clearAsrFinalTimer();
     this.asrSession?.close();
     this.asrSession = null;
@@ -508,7 +530,6 @@ export class VoicePipeline {
     this.recorder.stop();
     this.player.stop();
     this.ttsChain = Promise.resolve();
-    this.ttsSynthChain = Promise.resolve();
     this.ttsAborted = true;
     this.clearAsrFinalTimer();
     this.asrSession?.close();
@@ -540,46 +561,32 @@ export class VoicePipeline {
 
     if (!cleanText.trim()) return;
 
-    // TTS providers have a practical length ceiling (step voice ≈ 120 chars
-    // before 10s synth timeout). Split the text into short chunks on
-    // sentence boundaries. Synthesis and playback run as two separate
-    // chains so chunk N+1's synth starts while chunk N is still playing —
-    // the gap between chunks shrinks from "synth latency" to "≈0". synth
-    // is still serialised (not fanned out concurrently) so we don't
-    // hammer the provider with N parallel POSTs.
-    const chunks = chunkForTTS(cleanText, TTS_MAX_CHUNK_CHARS);
+    // Three-tier adaptive chunking: C1(60) + C2(150) + C3+(400).
+    // C1 and C2 synthesize concurrently; C3+ fire serially after the
+    // previous chunk's synth completes. Each chunk's playback (3x+ synth
+    // time) creates a natural window for the next chunk's synthesis.
+    const chunks = chunkForTTS(
+      cleanText, TTS_FIRST_CHUNK_CHARS, TTS_SECOND_CHUNK_CHARS, TTS_REST_CHUNK_CHARS,
+    );
     debugLog("TTS", `enqueue length=${cleanText.length} chunks=${chunks.length}: "${cleanText.slice(0, 60)}"`);
 
-    for (const chunk of chunks) {
-      // 1) Schedule synthesis right now, in series with previous synths.
-      //    synthPromise resolves with the audio bytes (or null on
-      //    abort/error). Captured here so the play step below can await it.
-      const synthPromise: Promise<ArrayBuffer | null> = (async () => {
-        // Wait for any prior synth to finish so we run at most one synth
-        // request in flight at a time (concurrency = 1 against provider).
-        await this.ttsSynthChain.catch(() => {});
-        if (this.ttsAborted) return null;
-        try {
-          debugLog("TTS", `synth start length=${chunk.length}`);
-          const { audioData } = await withTimeout(
-            tts.synthesize({ text: chunk }),
-            TTS_SYNTH_TIMEOUT_MS,
-            `TTS synth timed out after ${TTS_SYNTH_TIMEOUT_MS / 1000}s`
-          );
-          return audioData;
-        } catch (err) {
-          debugLog("TTS", `synth error: ${err instanceof Error ? err.message : err}`);
-          return null;
-        }
-      })();
-      // Advance the synth chain so the NEXT chunk's synth waits for THIS
-      // chunk's synth (not for its playback).
-      this.ttsSynthChain = synthPromise.then(() => undefined, () => undefined);
+    const synthOne = async (chunk: string): Promise<ArrayBuffer | null> => {
+      if (this.ttsAborted) return null;
+      try {
+        debugLog("TTS", `synth start length=${chunk.length}`);
+        const { audioData } = await withTimeout(
+          tts.synthesize({ text: chunk }),
+          TTS_SYNTH_TIMEOUT_MS,
+          `TTS synth timed out after ${TTS_SYNTH_TIMEOUT_MS / 1000}s`
+        );
+        return audioData;
+      } catch (err) {
+        debugLog("TTS", `synth error: ${err instanceof Error ? err.message : err}`);
+        return null;
+      }
+    };
 
-      // 2) Schedule playback after the previous chunk finishes playing
-      //    AND this chunk's audio is ready. Concurrency-2 effect: while
-      //    chunk N plays, chunk N+1 has already been synthesised in
-      //    parallel and is sitting waiting on playChain.
+    const enqueuePlay = (synthPromise: Promise<ArrayBuffer | null>) => {
       this.ttsChain = this.ttsChain.then(async () => {
         const audioData = await synthPromise;
         if (this.ttsAborted || !audioData) return;
@@ -591,6 +598,30 @@ export class VoicePipeline {
           debugLog("TTS", `play error: ${err instanceof Error ? err.message : err}`);
         }
       });
+    };
+
+    if (chunks.length <= 2) {
+      // C1 + C2: fire both concurrently, play sequentially.
+      for (const chunk of chunks) {
+        const p = synthOne(chunk);
+        enqueuePlay(p);
+      }
+    } else {
+      // C1 + C2 concurrent, C3+ serial after previous synth completes.
+      const p1 = synthOne(chunks[0]);
+      const p2 = synthOne(chunks[1]);
+      enqueuePlay(p1);
+      enqueuePlay(p2);
+
+      // C3+ wait for the previous synth to complete before firing.
+      let prevSynth: Promise<ArrayBuffer | null> = p2;
+      for (let i = 2; i < chunks.length; i++) {
+        const prev = prevSynth;
+        const chunk = chunks[i];
+        const p: Promise<ArrayBuffer | null> = prev.then(() => synthOne(chunk));
+        enqueuePlay(p);
+        prevSynth = p;
+      }
     }
   }
 
