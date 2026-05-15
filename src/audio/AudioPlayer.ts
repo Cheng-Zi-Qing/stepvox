@@ -1,4 +1,5 @@
 import type { AudioPlayerEvents } from "../types";
+import { debugLog } from "../utils/debug-logger";
 
 type EventName = keyof AudioPlayerEvents;
 
@@ -100,7 +101,7 @@ export class AudioPlayer {
         try {
           fn(...args);
         } catch (e) {
-          console.error("[StepVox] AudioPlayer listener error:", e);
+          debugLog("AudioPlayer", "listener error", e);
         }
       }
     }

@@ -1,3 +1,4 @@
+import { normalizePath } from "obsidian";
 import type { Tool } from "../types";
 
 export const createFolder: Tool = {
@@ -13,10 +14,10 @@ export const createFolder: Tool = {
     required: ["path"],
   },
   async execute(args, ctx) {
-    const path = args.path as string;
-    const existing = ctx.app.vault.getAbstractFileByPath(path);
-    if (existing) return `Folder already exists: ${path}`;
-    await ctx.app.vault.createFolder(path);
-    return `Created folder: ${path}`;
+    const resolved = normalizePath(args.path as string);
+    const existing = ctx.app.vault.getAbstractFileByPath(resolved);
+    if (existing) return `Folder already exists: ${resolved}`;
+    await ctx.app.vault.createFolder(resolved);
+    return `Created folder: ${resolved}`;
   },
 };

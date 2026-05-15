@@ -1,4 +1,5 @@
 import type { AudioRecorderEvents } from "../types";
+import { debugLog } from "../utils/debug-logger";
 import { createWorkletBlobURL } from "./pcm-worklet";
 
 type EventName = keyof AudioRecorderEvents;
@@ -125,7 +126,7 @@ export class AudioRecorder {
         try {
           fn(...args);
         } catch (e) {
-          console.error("[StepVox] AudioRecorder listener error:", e);
+          debugLog("AudioRecorder", "listener error", e);
         }
       }
     }

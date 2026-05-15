@@ -1,4 +1,4 @@
-import { TFolder } from "obsidian";
+import { TFolder, normalizePath } from "obsidian";
 import type { Tool } from "../types";
 
 const MAX_ENTRIES = 50;
@@ -14,7 +14,7 @@ export const listFiles: Tool = {
     },
   },
   async execute(args, ctx) {
-    const folder = args.folder as string | undefined;
+    const folder = args.folder ? normalizePath(args.folder as string) : undefined;
     const abstract = folder
       ? ctx.app.vault.getAbstractFileByPath(folder)
       : ctx.app.vault.getRoot();

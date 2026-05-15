@@ -187,7 +187,7 @@ export class VoicePipeline {
     this.settings = settings;
     this.callbacks = callbacks;
 
-    initDebugLogger(app);
+    initDebugLogger(app.vault.adapter);
 
     this.recorder = new AudioRecorder({
       sampleRate: settings.audio.sampleRate,

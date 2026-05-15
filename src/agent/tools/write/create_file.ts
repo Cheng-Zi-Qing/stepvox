@@ -1,3 +1,4 @@
+import { normalizePath } from "obsidian";
 import type { Tool } from "../types";
 
 export const createFile: Tool = {
@@ -13,9 +14,8 @@ export const createFile: Tool = {
     required: ["path", "content"],
   },
   async execute(args, ctx) {
-    const path = args.path as string;
+    let resolved = normalizePath(args.path as string);
     const content = args.content as string;
-    let resolved = path;
     if (!resolved.endsWith(".md")) resolved += ".md";
     const existing = ctx.app.vault.getAbstractFileByPath(resolved);
     if (existing) throw new Error(`File already exists: ${resolved}`);

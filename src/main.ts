@@ -19,7 +19,7 @@ export default class StepVoxPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
 
-    initDebugLogger(this.app);
+    initDebugLogger(this.app.vault.adapter);
     setDebugEnabled(this.settings.debug.enabled);
     maybeRotateLog();
     // Re-check daily so long-running sessions also rotate.

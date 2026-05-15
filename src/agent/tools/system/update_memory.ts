@@ -62,7 +62,7 @@ export const updateMemory: Tool = {
 
     const json = JSON.stringify(updated, null, 2);
     if (file instanceof TFile) {
-      await ctx.app.vault.modify(file, json);
+      await ctx.app.vault.process(file, () => json);
     } else {
       await ctx.app.vault.create(path, json);
     }

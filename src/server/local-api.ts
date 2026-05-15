@@ -46,7 +46,7 @@ export class LocalApiServer {
         res.writeHead(200);
         res.end(JSON.stringify({ recording }));
       } catch (err) {
-        console.error("LocalApiServer: toggle failed", err);
+        debugLog("API", "toggle failed", err);
         res.writeHead(500);
         res.end(JSON.stringify({ error: "Internal error" }));
       }
@@ -55,10 +55,10 @@ export class LocalApiServer {
     this.server.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE") {
         const msg = `StepVox: Local API port ${this.port} is in use. Global hotkey unavailable.`;
-        console.error(msg);
+        debugLog("API", msg);
         this.onStartError?.(msg);
       } else {
-        console.error("LocalApiServer: unexpected error", err);
+        debugLog("API", "unexpected error", err);
       }
     });
 

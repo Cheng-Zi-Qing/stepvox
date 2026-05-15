@@ -401,7 +401,7 @@ export class StepVoxSettingTab extends PluginSettingTab {
       );
 
     // ── Web Search ──────────────────────────────────────
-    new Setting(containerEl).setName("Web Search").setHeading();
+    new Setting(containerEl).setName("Web search").setHeading();
 
     new Setting(containerEl)
       .setName("Provider")
@@ -690,7 +690,7 @@ class PromptBlockEditModal extends Modal {
     modalEl.addClass("stepvox-prompt-modal");
     contentEl.empty();
 
-    contentEl.createEl("h2", { text: `Edit ${this.label}` });
+    new Setting(contentEl).setName(`Edit ${this.label}`).setHeading();
     contentEl.createEl("p", {
       text: "Leave the editor empty to fall back to the default shown below.",
       cls: "setting-item-description",
